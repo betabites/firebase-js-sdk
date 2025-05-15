@@ -43,8 +43,7 @@ import { FirebaseStorageImpl } from '../../src/service';
 import {
   assertObjectIncludes,
   fakeAuthProvider,
-  fakeAppCheckTokenProvider,
-  fakeResponse
+  fakeAppCheckTokenProvider, fakeResponse
 } from './testshared';
 import {
   DEFAULT_HOST,
@@ -174,8 +173,7 @@ describe('Firebase Storage > Requests', () => {
   async function checkMetadataHandler(
     requestInfo: RequestInfo<Promise<Metadata>>
   ): Promise<void> {
-    const metadata = await requestInfo.handler(
-      fakeResponse(serverResourceString, {})
+    const metadata = await requestInfo.handler(fakeResponse(serverResourceString, {})
     );
     assert.deepEqual(metadata, metadataFromServerResource);
   }
@@ -289,8 +287,7 @@ describe('Firebase Storage > Requests', () => {
       nextPageToken: pageToken
     };
     const listResponseString = JSON.stringify(listResponse);
-    const listResult = await requestInfo.handler(
-      fakeResponse(listResponseString, {})
+    const listResult = await requestInfo.handler(fakeResponse(listResponseString, {})
     );
     assert.equal(listResult.prefixes[0].fullPath, 'a/f');
     assert.equal(listResult.items[0].fullPath, 'a/a');
@@ -311,8 +308,7 @@ describe('Firebase Storage > Requests', () => {
       nextPageToken: pageToken
     };
     const listResponseString = JSON.stringify(listResponse);
-    const listResult = await requestInfo.handler(
-      fakeResponse(listResponseString, {})
+    const listResult = await requestInfo.handler(fakeResponse(listResponseString, {})
     );
     assert.equal(listResult.items[0].bucket, differentBucket);
   });
@@ -342,8 +338,7 @@ describe('Firebase Storage > Requests', () => {
       locationNormal,
       mappings
     );
-    const url = await requestInfo.handler(
-      fakeResponse(serverResourceString, {})
+    const url = await requestInfo.handler(fakeResponse(serverResourceString, {})
     );
     assert.equal(url, downloadUrlFromServerResource);
   });

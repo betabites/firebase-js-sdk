@@ -15,7 +15,6 @@
  * limitations under the License.
  */
 import { StorageError } from './error';
-import { Headers } from './connection';
 
 /**
  * Type for url params stored in RequestInfo.

@@ -88,6 +88,8 @@ function refFromPath(
   }
 }
 
+type Awaited<T> = T extends Promise<infer O> ? Awaited<O> : T;
+
 /**
  * Returns a storage Reference for the given url.
  * @param storage - `Storage` instance.

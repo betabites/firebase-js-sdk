@@ -264,14 +264,12 @@ export function uploadBytes(
     new FbsBlob(data, true),
     metadata
   );
-  return ref.storage
-    .makeRequestWithTokens(requestInfo)
-    .then(finalMetadata => {
-      return {
-        metadata: finalMetadata,
-        ref
-      } satisfies UploadResult;
-    });
+  return ref.storage.makeRequestWithTokens(requestInfo).then(finalMetadata => {
+    return {
+      metadata: finalMetadata,
+      ref
+    } satisfies UploadResult;
+  });
 }
 
 /**
@@ -469,14 +467,12 @@ export function getDownloadURL(ref: Reference): Promise<string> {
     ref._location,
     getMappings()
   );
-  return ref.storage
-    .makeRequestWithTokens(requestInfo)
-    .then(url => {
-      if (url === null) {
-        throw noDownloadURL();
-      }
-      return url;
-    });
+  return ref.storage.makeRequestWithTokens(requestInfo).then(url => {
+    if (url === null) {
+      throw noDownloadURL();
+    }
+    return url;
+  });
 }
 
 /**

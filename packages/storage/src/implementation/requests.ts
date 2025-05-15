@@ -397,10 +397,7 @@ export class ResumableUploadStatus {
   }
 }
 
-export function checkResumeHeader_(
-  res: Response,
-  allowed?: string[]
-): string {
+export function checkResumeHeader_(res: Response, allowed?: string[]): string {
   const status = res.headers.get('X-Goog-Upload-Status');
   if (!status) {
     handlerCheck(false);
@@ -543,9 +540,7 @@ export function continueResumableUpload(
     throw cannotSliceBlob();
   }
 
-  async function handler(
-    res: Response
-  ): Promise<ResumableUploadStatus> {
+  async function handler(res: Response): Promise<ResumableUploadStatus> {
     // TODO(andysoto): Verify the MD5 of each uploaded range:
     // the 'x-range-md5' header comes back with status code 308 responses.
     // We'll only be able to bail out though, because you can't re-upload a

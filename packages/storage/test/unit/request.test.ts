@@ -18,7 +18,6 @@ import { assert } from 'chai';
 import * as sinon from 'sinon';
 import { makeRequest } from '../../src/implementation/request';
 import { RequestInfo } from '../../src/implementation/requestinfo';
-import { Connection } from '../../src/implementation/connection';
 import { TestingConnection, newTestConnection } from './connection';
 
 const TEST_VERSION = '1.2.3';
@@ -44,10 +43,11 @@ describe('Firebase Storage > Request', () => {
     }
     const spiedSend = sinon.spy(newSend);
 
-    function handler(connection: Connection<string>, text: string): string {
+    async function handler(res: Response): Promise<string> {
+      const text = await res.text();
       assert.equal(text, response);
-      assert.equal(connection.getResponseHeader(responseHeader), responseValue);
-      assert.equal(connection.getStatus(), status);
+      assert.equal(res.headers.get(responseHeader), responseValue);
+      assert.equal(res.status, status);
       return text;
     }
 
@@ -92,8 +92,8 @@ describe('Firebase Storage > Request', () => {
     }
     const spiedSend = sinon.spy(newSend);
 
-    function handler(connection: Connection<string>, text: string): string {
-      return text;
+    function handler(res: Response): Promise<string> {
+      return res.text();
     }
 
     const url = 'http://my-url.com/';

@@ -172,13 +172,13 @@ describe('Firebase Storage > Requests', () => {
   }
 
   function checkMetadataHandler(
-    requestInfo: RequestInfo<string, Metadata>
+    requestInfo: RequestInfo<Metadata>
   ): void {
     const metadata = requestInfo.handler(fakeXhrIo({}), serverResourceString);
     assert.deepEqual(metadata, metadataFromServerResource);
   }
 
-  function checkNoOpHandler<T>(requestInfo: RequestInfo<string, T>): void {
+  function checkNoOpHandler<T>(requestInfo: RequestInfo<T>): void {
     try {
       requestInfo.handler(fakeXhrIo({}), '');
     } catch (e) {

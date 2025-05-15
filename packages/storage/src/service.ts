@@ -163,6 +163,11 @@ export function connectStorageEmulator(
   }
 }
 
+let fetchOverride = fetch;
+export function injectTestFetch(fetch: typeof fetchOverride): void {
+  fetchOverride = fetch;
+}
+
 /**
  * A service that provides Firebase Storage Reference instances.
  * @param opt_url - gs:// url to a custom Storage Bucket
@@ -348,7 +353,7 @@ export class FirebaseStorageImpl implements FirebaseStorage {
       'X-Firebase-Storage-Version',
       'webjs/' + (this._firebaseVersion ?? 'AppManager')
     );
-    const request = fetch(`${requestInfo.url}?${params.toString()}`, {
+    const request = fetchOverride(`${requestInfo.url}?${params.toString()}`, {
       ...requestInfo,
       headers,
       signal: abortSignal

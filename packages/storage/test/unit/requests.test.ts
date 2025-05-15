@@ -42,9 +42,9 @@ import { Metadata } from '../../src/metadata';
 import { FirebaseStorageImpl } from '../../src/service';
 import {
   assertObjectIncludes,
-  fakeXhrIo,
   fakeAuthProvider,
-  fakeAppCheckTokenProvider
+  fakeAppCheckTokenProvider,
+  fakeResponse
 } from './testshared';
 import {
   DEFAULT_HOST,
@@ -171,16 +171,18 @@ describe('Firebase Storage > Requests', () => {
     }
   }
 
-  function checkMetadataHandler(
-    requestInfo: RequestInfo<Metadata>
-  ): void {
-    const metadata = requestInfo.handler(fakeXhrIo({}), serverResourceString);
+  async function checkMetadataHandler(
+    requestInfo: RequestInfo<Promise<Metadata>>
+  ): Promise<void> {
+    const metadata = await requestInfo.handler(
+      fakeResponse(serverResourceString, {})
+    );
     assert.deepEqual(metadata, metadataFromServerResource);
   }
 
   function checkNoOpHandler<T>(requestInfo: RequestInfo<T>): void {
     try {
-      requestInfo.handler(fakeXhrIo({}), '');
+      requestInfo.handler(fakeResponse('', {}));
     } catch (e) {
       assert.fail('Remove handler threw');
     }
@@ -206,9 +208,9 @@ describe('Firebase Storage > Requests', () => {
     }
   });
 
-  it('getMetadata handler', () => {
+  it('getMetadata handler', async () => {
     const requestInfo = getMetadata(storageService, locationNormal, mappings);
-    checkMetadataHandler(requestInfo);
+    await checkMetadataHandler(requestInfo);
   });
 
   it('list root request info', () => {
@@ -269,7 +271,7 @@ describe('Firebase Storage > Requests', () => {
     }
   });
 
-  it('list handler', () => {
+  it('list handler', async () => {
     const requestInfo = list(storageService, locationNormal);
     const pageToken = 'YS9mLw==';
     const listResponse = {
@@ -287,14 +289,16 @@ describe('Firebase Storage > Requests', () => {
       nextPageToken: pageToken
     };
     const listResponseString = JSON.stringify(listResponse);
-    const listResult = requestInfo.handler(fakeXhrIo({}), listResponseString);
+    const listResult = await requestInfo.handler(
+      fakeResponse(listResponseString, {})
+    );
     assert.equal(listResult.prefixes[0].fullPath, 'a/f');
     assert.equal(listResult.items[0].fullPath, 'a/a');
     assert.equal(listResult.items[1].fullPath, 'a/b');
     assert.equal(listResult.nextPageToken, pageToken);
   });
 
-  it('list handler with custom bucket', () => {
+  it('list handler with custom bucket', async () => {
     const requestInfo = list(storageService, locationDifferentBucket);
     const pageToken = 'YS9mLw==';
     const listResponse = {
@@ -307,7 +311,9 @@ describe('Firebase Storage > Requests', () => {
       nextPageToken: pageToken
     };
     const listResponseString = JSON.stringify(listResponse);
-    const listResult = requestInfo.handler(fakeXhrIo({}), listResponseString);
+    const listResult = await requestInfo.handler(
+      fakeResponse(listResponseString, {})
+    );
     assert.equal(listResult.items[0].bucket, differentBucket);
   });
 
@@ -330,21 +336,22 @@ describe('Firebase Storage > Requests', () => {
       );
     }
   });
-  it('getDownloadUrl handler', () => {
+  it('getDownloadUrl handler', async () => {
     const requestInfo = getDownloadUrl(
       storageService,
       locationNormal,
       mappings
     );
-    const url = requestInfo.handler(fakeXhrIo({}), serverResourceString);
+    const url = await requestInfo.handler(
+      fakeResponse(serverResourceString, {})
+    );
     assert.equal(url, downloadUrlFromServerResource);
   });
-  it('getBytes handler', () => {
+  it('getBytes handler', async () => {
     const requestInfo = getResponse(storageService, locationNormal);
-    const bytes = requestInfo.handler(
-      fakeXhrIo({}),
-      new Uint8Array([1, 128, 255])
-    ) as ArrayBuffer; // Narrow type to ArrayBuffer
+    const bytes = await requestInfo
+      .handler(fakeResponse(new Uint8Array([1, 128, 255]), {}))
+      .arrayBuffer(); // Narrow type to ArrayBuffer
     assert.deepEqual(new Uint8Array(bytes), new Uint8Array([1, 128, 255]));
   });
   it('updateMetadata requestinfo', () => {
@@ -373,14 +380,14 @@ describe('Firebase Storage > Requests', () => {
       );
     }
   });
-  it('updateMetadata handler', () => {
+  it('updateMetadata handler', async () => {
     const requestInfo = updateMetadata(
       storageService,
       locationNormal,
       metadata,
       mappings
     );
-    checkMetadataHandler(requestInfo);
+    await checkMetadataHandler(requestInfo);
   });
 
   it('deleteObject request info', () => {
@@ -476,7 +483,7 @@ describe('Firebase Storage > Requests', () => {
 
     return Promise.all(promises);
   });
-  it('multipartUpload handler', () => {
+  it('multipartUpload handler', async () => {
     const requestInfo = multipartUpload(
       storageService,
       locationNormal,
@@ -484,7 +491,7 @@ describe('Firebase Storage > Requests', () => {
       smallBlob,
       metadata
     );
-    checkMetadataHandler(requestInfo);
+    await checkMetadataHandler(requestInfo);
   });
 
   it('createResumableUpload request info', () => {
@@ -536,11 +543,10 @@ describe('Firebase Storage > Requests', () => {
     const uploadUrl = 'https://i.am.an.upload.url.com/hello/there';
 
     const handlerUrl = requestInfo.handler(
-      fakeXhrIo({
+      fakeResponse('', {
         'X-Goog-Upload-Status': 'active',
         'X-Goog-Upload-URL': uploadUrl
-      }),
-      ''
+      })
     );
 
     assert.equal(handlerUrl, uploadUrl);
@@ -575,21 +581,19 @@ describe('Firebase Storage > Requests', () => {
     );
 
     let status = requestInfo.handler(
-      fakeXhrIo({
+      fakeResponse('', {
         'X-Goog-Upload-Status': 'active',
         'X-Goog-Upload-Size-Received': '0'
-      }),
-      ''
+      })
     );
     let expectedStatus = new ResumableUploadStatus(0, smallBlob.size(), false);
     assert.deepEqual(status, expectedStatus);
 
     status = requestInfo.handler(
-      fakeXhrIo({
+      fakeResponse('', {
         'X-Goog-Upload-Status': 'final',
         'X-Goog-Upload-Size-Received': '' + smallBlob.size()
-      }),
-      ''
+      })
     );
     expectedStatus = new ResumableUploadStatus(
       smallBlob.size(),
@@ -689,7 +693,7 @@ describe('Firebase Storage > Requests', () => {
       bigBlob.slice(blobSize, blobSize)!.uploadData()
     );
   });
-  it('continueResumableUpload handler', () => {
+  it('continueResumableUpload handler', async () => {
     const url =
       'https://this.is.totally.a.real.url.com/hello/upload?whatsgoingon';
     const chunkSize = RESUMABLE_UPLOAD_CHUNK_SIZE;
@@ -703,9 +707,8 @@ describe('Firebase Storage > Requests', () => {
       chunkSize,
       mappings
     );
-    let status = requestInfo.handler(
-      fakeXhrIo({ 'X-Goog-Upload-Status': 'final' }),
-      serverResourceString
+    let status = await requestInfo.handler(
+      fakeResponse(serverResourceString, { 'X-Goog-Upload-Status': 'final' })
     );
     let expectedStatus = new ResumableUploadStatus(
       smallBlob.size(),
@@ -724,9 +727,8 @@ describe('Firebase Storage > Requests', () => {
       chunkSize,
       mappings
     );
-    status = requestInfo.handler(
-      fakeXhrIo({ 'X-Goog-Upload-Status': 'active' }),
-      ''
+    status = await requestInfo.handler(
+      fakeResponse('', { 'X-Goog-Upload-Status': 'active' })
     );
     expectedStatus = new ResumableUploadStatus(
       chunkSize,
@@ -739,19 +741,28 @@ describe('Firebase Storage > Requests', () => {
   it('error handler passes through unknown errors', () => {
     const requestInfo = getMetadata(storageService, locationNormal, mappings);
     const error = unknown();
-    const resultError = requestInfo.errorHandler!(fakeXhrIo({}, 509), error);
+    const resultError = requestInfo.errorHandler!(
+      fakeResponse('', {}, 509),
+      error
+    );
     assert.equal(resultError, error);
   });
   it('error handler converts 404 to not found', () => {
     const requestInfo = getMetadata(storageService, locationNormal, mappings);
     const error = unknown();
-    const resultError = requestInfo.errorHandler!(fakeXhrIo({}, 404), error);
+    const resultError = requestInfo.errorHandler!(
+      fakeResponse('', {}, 404),
+      error
+    );
     assert.isTrue(resultError._codeEquals(StorageErrorCode.OBJECT_NOT_FOUND));
   });
   it('error handler converts 402 to quota exceeded', () => {
     const requestInfo = getMetadata(storageService, locationNormal, mappings);
     const error = unknown();
-    const resultError = requestInfo.errorHandler!(fakeXhrIo({}, 402), error);
+    const resultError = requestInfo.errorHandler!(
+      fakeResponse('', {}, 402),
+      error
+    );
     assert.isTrue(resultError._codeEquals(StorageErrorCode.QUOTA_EXCEEDED));
   });
 });

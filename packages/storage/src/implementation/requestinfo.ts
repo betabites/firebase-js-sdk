@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 import { StorageError } from './error';
-import { Headers, Connection, ConnectionType } from './connection';
+import { Headers } from './connection';
 
 /**
  * Type for url params stored in RequestInfo.
@@ -35,8 +35,8 @@ export type RequestHandler<O> = (res: Response) => O;
 
 /** A function to handle an error. */
 export type ErrorHandler = (
-  connection: Connection<ConnectionType>,
-  response: StorageError
+  response: Response,
+  error: StorageError
 ) => StorageError;
 
 /**

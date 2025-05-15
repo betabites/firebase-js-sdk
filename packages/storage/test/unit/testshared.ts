@@ -22,12 +22,6 @@ use(chaiAsPromised);
 import { FirebaseApp } from '@firebase/app-types';
 import { CONFIG_STORAGE_BUCKET_KEY } from '../../src/implementation/constants';
 import { StorageError } from '../../src/implementation/error';
-import {
-  Headers,
-  Connection,
-  ConnectionType
-} from '../../src/implementation/connection';
-import { newTestConnection, TestingConnection } from './connection';
 import { FirebaseAuthInternalName } from '@firebase/auth-interop-types';
 import {
   Provider,
@@ -36,9 +30,8 @@ import {
   ComponentType
 } from '@firebase/component';
 import { AppCheckInternalComponentName } from '@firebase/app-check-interop-types';
-import { FirebaseStorageImpl } from '../../src/service';
+import { FirebaseStorageImpl, injectTestFetch } from '../../src/service';
 import { Metadata } from '../../src/metadata';
-import { injectTestConnection } from '../../src/platform/connection';
 
 export const authToken = 'totally-legit-auth-token';
 export const appCheckToken = 'totally-shady-token';
@@ -110,61 +103,14 @@ export function makeFakeAppCheckProvider(tokenResult: {
   return provider as Provider<AppCheckInternalComponentName>;
 }
 
-/**
- * Returns something that looks like an fbs.XhrIo with the given headers
- * and status.
- */
-export function fakeXhrIo<I extends ConnectionType = string>(
-  headers: Headers,
-  status: number = 200
-): Connection<I> {
-  const lower: Headers = {};
-  for (const [key, value] of Object.entries(headers)) {
-    lower[key.toLowerCase()] = value.toString();
-  }
-
-  const fakeConnection: any = {
-    getResponseHeader(name: string): string {
-      const lowerName = name.toLowerCase();
-      if (lower.hasOwnProperty(lowerName)) {
-        return lower[lowerName];
-      } else {
-        throw new Error('No such header ' + name);
-      }
-    },
-    getStatus(): number {
-      return status;
-    }
-  };
-
-  return fakeConnection as Connection<I>;
-}
-
 export function fakeResponse(
-  headers: Headers,
+  body: BodyInit | null,
+  headers: HeadersInit,
   status: number = 200
 ): Response {
-  const lower: Headers = {};
-  for (const [key, value] of Object.entries(headers)) {
-    lower[key.toLowerCase()] = value.toString();
-  }
-
-  const fakeConnection: any = {
-    getResponseHeader(name: string): string {
-      const lowerName = name.toLowerCase();
-      if (lower.hasOwnProperty(lowerName)) {
-        return lower[lowerName];
-      } else {
-        throw new Error('No such header ' + name);
-      }
-    },
-    getStatus(): number {
-      return status;
-    }
-  };
-
-  return new Response("", {
-    status, headers
+  return new Response(body, {
+    status,
+    headers
   });
 }
 
@@ -220,40 +166,31 @@ export function assertObjectIncludes(
 
 const defaultFakeMetadata: Partial<Metadata> = { 'downloadTokens': ['a', 'b'] };
 
-interface Response {
-  status: number;
-  body: string;
-  headers: Headers;
-}
 export type RequestHandler = (
   url: string,
   method: string,
-  body?: ArrayBufferView | Blob | string | null,
-  headers?: Headers
+  body?: BodyInit | string | null,
+  headers?: HeadersInit
 ) => Response;
 
 export function storageServiceWithHandler(
   handler: RequestHandler,
   shouldResponseCb?: () => boolean
 ): FirebaseStorageImpl {
-  function newSend(
-    connection: TestingConnection,
-    url: string,
-    method: string,
-    body?: ArrayBufferView | Blob | string | null,
-    headers?: Headers
-  ): void {
-    const response = handler(url, method, body, headers);
-    if (!shouldResponseCb || shouldResponseCb()) {
-      connection.simulateResponse(
-        response.status,
-        response.body,
-        response.headers
-      );
+  injectTestFetch(
+    async (url: URL | RequestInfo | Request, opts?: RequestInit) => {
+      if (!shouldResponseCb || shouldResponseCb()) {
+        return handler(
+          url.toString(),
+          opts?.method ?? 'get',
+          opts?.body,
+          opts?.headers
+        );
+      }
+      return new Response();
     }
-  }
+  );
 
-  injectTestConnection(() => newTestConnection(newSend));
   return new FirebaseStorageImpl(
     {} as FirebaseApp,
     emptyAuthProvider,
@@ -275,72 +212,76 @@ export function fakeServerHandler(
 
   function statusHeaders(status: string, existing?: Headers): Headers {
     if (existing) {
-      existing['X-Goog-Upload-Status'] = status;
+      existing.set('X-Goog-Upload-Status', status);
       return existing;
     } else {
-      return { 'X-Goog-Upload-Status': status };
+      return new Headers({ 'X-Goog-Upload-Status': status });
     }
   }
 
   function handler(
     url: string,
     method: string,
-    content?: ArrayBufferView | Blob | string | null,
-    headers?: Headers
+    body?: BodyInit | string | null,
+    headers?: HeadersInit
   ): Response {
     method = method || 'GET';
-    content = content || '';
-    headers = headers || {};
+    body = body || '';
+    const parsedHeaders = new Headers(headers);
 
-    if (headers['X-Goog-Upload-Protocol'] === 'multipart') {
-      return {
+    if (parsedHeaders.get('X-Goog-Upload-Protocol') === 'multipart') {
+      return new Response(JSON.stringify(fakeMetadata), {
         status: 200,
-        body: JSON.stringify(fakeMetadata),
         headers: statusHeaders('final')
-      };
+      });
     }
 
-    const contentLength =
-      (content as Blob).size || (content as string).length || 0;
+    const contentLength = (body as Blob).size || (body as string).length || 0;
 
-    if (headers['X-Goog-Upload-Protocol'] === 'resumable') {
+    if (parsedHeaders.get('X-Goog-Upload-Protocol') === 'resumable') {
       const thisId = nextId;
       nextId++;
       stats[thisId] = {
         currentSize: 0,
-        finalSize: +headers['X-Goog-Upload-Header-Content-Length']
+        finalSize: +(
+          parsedHeaders.get('X-Goog-Upload-Header-Content-Length') ?? 0
+        )
       };
 
-      return {
+      return new Response('', {
         status: 200,
-        body: '',
-        headers: statusHeaders('active', {
-          'X-Goog-Upload-URL': 'http://example.com?' + thisId
-        })
-      };
+        headers: statusHeaders(
+          'active',
+          new Headers({
+            'X-Goog-Upload-URL': 'http://example.com?' + thisId
+          })
+        )
+      });
     }
 
     const matches = url.match(/^http:\/\/example\.com\?([0-9]+)$/);
     if (matches === null) {
-      return { status: 400, body: '', headers: {} };
+      return new Response('', { status: 400, headers: {} });
     }
 
     const id = +matches[1];
     if (!stats[id]) {
-      return { status: 400, body: 'Invalid upload id', headers: {} };
+      return new Response('Invalid upload id', { status: 400, headers: {} });
     }
 
-    if (headers['X-Goog-Upload-Command'] === 'query') {
-      return {
+    if (parsedHeaders.get('X-Goog-Upload-Command') === 'query') {
+      return new Response('', {
         status: 200,
-        body: '',
-        headers: statusHeaders('active', {
-          'X-Goog-Upload-Size-Received': stats[id].currentSize.toString()
-        })
-      };
+        headers: statusHeaders(
+          'active',
+          new Headers({
+            'X-Goog-Upload-Size-Received': stats[id].currentSize.toString()
+          })
+        )
+      });
     }
 
-    const commands = (headers['X-Goog-Upload-Command'] as string)
+    const commands = (parsedHeaders.get('X-Goog-Upload-Command') as string)
       .split(',')
       .map(str => {
         return str.trim();
@@ -350,37 +291,41 @@ export function fakeServerHandler(
     const stat = stats[id];
 
     if (isUpload) {
-      const offset = +headers['X-Goog-Upload-Offset'];
+      const offset = +(parsedHeaders.get('X-Goog-Upload-Offset') ?? 0);
       if (offset !== stat.currentSize) {
-        return { status: 400, body: 'Uploading at wrong offset', headers: {} };
+        return new Response('Uploading at wrong offset', {
+          status: 400,
+          headers: {}
+        });
       }
 
       stat.currentSize += contentLength;
       if (stat.currentSize > stat.finalSize) {
-        return { status: 400, body: 'Too many bytes', headers: {} };
+        return new Response('Too many bytes', { status: 400, headers: {} });
       } else if (!isFinalize) {
-        return { status: 200, body: '', headers: statusHeaders('active') };
+        return new Response('', {
+          status: 200,
+          headers: statusHeaders('active')
+        });
       }
     }
 
     if (isFinalize) {
       const isDone = stat.currentSize === stat.finalSize;
       if (isDone) {
-        return {
+        return new Response(JSON.stringify(fakeMetadata), {
           status: 200,
-          body: JSON.stringify(fakeMetadata),
           headers: statusHeaders('final')
-        };
+        });
       } else {
-        return {
+        return new Response('finalize without the right # of bytes', {
           status: 400,
-          body: 'finalize without the right # of bytes',
           headers: {}
-        };
+        });
       }
     }
 
-    return { status: 400, body: '', headers: {} };
+    return new Response('', { status: 400, headers: {} });
   }
   return handler;
 }
@@ -402,65 +347,69 @@ export function fake503ForFinalizeServerHandler(
 
   let nextId: number = 0;
 
-  function statusHeaders(status: string, existing?: Headers): Headers {
+  function statusHeaders(status: string, existing?: HeadersInit): Headers {
     if (existing) {
-      existing['X-Goog-Upload-Status'] = status;
-      return existing;
+      const headers = new Headers(existing);
+      headers.set('X-Goog-Upload-Status', status);
+      return headers;
     } else {
-      return { 'X-Goog-Upload-Status': status };
+      return new Headers({ 'X-Goog-Upload-Status': status });
     }
   }
 
   function handler(
     url: string,
     method: string,
-    content?: ArrayBufferView | Blob | string | null,
-    headers?: Headers
+    content?: BodyInit | string | null,
+    headers?: HeadersInit
   ): Response {
     method = method || 'GET';
     content = content || '';
-    headers = headers || {};
+    const parsedHeaders = new Headers(headers);
 
     // const contentLength =
     // (content as Blob).size || (content as string).length || 0;
-    if (headers['X-Goog-Upload-Protocol'] === 'resumable') {
+    if (parsedHeaders.get('X-Goog-Upload-Protocol') === 'resumable') {
       const thisId = nextId;
       nextId++;
       stats[thisId] = {
         currentSize: 0,
-        finalSize: +headers['X-Goog-Upload-Header-Content-Length']
+        finalSize: +(
+          parsedHeaders.get('X-Goog-Upload-Header-Content-Length') ?? 0
+        )
       };
 
-      return {
+      return new Response('', {
         status: 200,
-        body: '',
-        headers: statusHeaders('active', {
-          'X-Goog-Upload-URL': 'http://example.com?' + thisId
-        })
-      };
+        headers: statusHeaders(
+          'active',
+          new Headers({
+            'X-Goog-Upload-URL': 'http://example.com?' + thisId
+          })
+        )
+      });
     }
 
     const matches = url.match(/^http:\/\/example\.com\?([0-9]+)$/);
     if (matches === null) {
-      return { status: 400, body: '', headers: {} };
+      return new Response('', { status: 400, headers: {} });
     }
 
     const id = +matches[1];
     if (!stats[id]) {
-      return { status: 400, body: 'Invalid upload id', headers: {} };
+      return new Response('Invalid upload id', { status: 400, headers: {} });
     }
 
-    if (headers['X-Goog-Upload-Command'] === 'query') {
-      return {
+    if (parsedHeaders.get('X-Goog-Upload-Command') === 'query') {
+      return new Response('', {
         status: 200,
-        body: '',
         headers: statusHeaders('active', {
           'X-Goog-Upload-Size-Received': stats[id].finalSize.toString()
         })
-      };
+      });
     }
 
-    const commands = (headers['X-Goog-Upload-Command'] as string)
+    const commands = (parsedHeaders.get('X-Goog-Upload-Command') as string)
       .split(',')
       .map(str => {
         return str.trim();
@@ -468,17 +417,15 @@ export function fake503ForFinalizeServerHandler(
     const isFinalize = commands.indexOf('finalize') !== -1;
 
     if (isFinalize) {
-      return {
+      return new Response(JSON.stringify(fakeMetadata), {
         status: 503,
-        body: JSON.stringify(fakeMetadata),
         headers: statusHeaders('final')
-      };
+      });
     } else {
-      return {
+      return new Response(JSON.stringify(fakeMetadata), {
         status: 200,
-        body: JSON.stringify(fakeMetadata),
         headers: statusHeaders('active')
-      };
+      });
     }
   }
   return handler;
@@ -502,65 +449,66 @@ export function fake503ForUploadServerHandler(
 
   let nextId: number = 0;
 
-  function statusHeaders(status: string, existing?: Headers): Headers {
+  function statusHeaders(status: string, existing?: HeadersInit): Headers {
     if (existing) {
-      existing['X-Goog-Upload-Status'] = status;
-      return existing;
+      const headers = new Headers(existing);
+      headers.set('X-Goog-Upload-Status', status);
+      return headers;
     } else {
-      return { 'X-Goog-Upload-Status': status };
+      return new Headers({ 'X-Goog-Upload-Status': status });
     }
   }
 
   function handler(
     url: string,
     method: string,
-    content?: ArrayBufferView | Blob | string | null,
-    headers?: Headers
+    content?: BodyInit | string | null,
+    headers?: HeadersInit
   ): Response {
     method = method || 'GET';
     content = content || '';
-    headers = headers || {};
+    const parsedHeaders = new Headers(headers);
 
     // const contentLength =
     // (content as Blob).size || (content as string).length || 0;
-    if (headers['X-Goog-Upload-Protocol'] === 'resumable') {
+    if (parsedHeaders.get('X-Goog-Upload-Protocol') === 'resumable') {
       const thisId = nextId;
       nextId++;
       stats[thisId] = {
         currentSize: 0,
-        finalSize: +headers['X-Goog-Upload-Header-Content-Length']
+        finalSize: +(
+          parsedHeaders.get('X-Goog-Upload-Header-Content-Length') ?? 0
+        )
       };
 
-      return {
+      return new Response('', {
         status: 200,
-        body: '',
         headers: statusHeaders('active', {
           'X-Goog-Upload-URL': 'http://example.com?' + thisId
         })
-      };
+      });
     }
 
     const matches = url.match(/^http:\/\/example\.com\?([0-9]+)$/);
     if (matches === null) {
-      return { status: 400, body: '', headers: {} };
+      return new Response('', { status: 400, headers: {} });
     }
 
     const id = +matches[1];
     if (!stats[id]) {
-      return { status: 400, body: 'Invalid upload id', headers: {} };
+      return new Response('Invalid upload id', { status: 400, headers: {} });
     }
 
-    if (headers['X-Goog-Upload-Command'] === 'query') {
-      return {
+    if (parsedHeaders.get('X-Goog-Upload-Command') === 'query') {
+      return new Response('', {
         status: 200,
-        body: '',
         headers: statusHeaders('active', {
-          'X-Goog-Upload-Size-Received': stats[id].currentSize.toString()
+          'X-Goog-Upload-Size-Received': stats[id].finalSize.toString()
         })
-      };
+      });
     }
 
-    const commands = (headers['X-Goog-Upload-Command'] as string)
+    const commands = (parsedHeaders.get('X-Goog-Upload-Command') as string)
       .split(',')
       .map(str => {
         return str.trim();
@@ -571,17 +519,15 @@ export function fake503ForUploadServerHandler(
       if (cb) {
         cb();
       }
-      return {
+      return new Response(JSON.stringify(fakeMetadata), {
         status: 503,
-        body: JSON.stringify(fakeMetadata),
         headers: statusHeaders('active')
-      };
+      });
     } else {
-      return {
+      return new Response(JSON.stringify(fakeMetadata), {
         status: 200,
-        body: JSON.stringify(fakeMetadata),
         headers: statusHeaders('final')
-      };
+      });
     }
   }
   return handler;
@@ -590,30 +536,30 @@ export function fake503ForUploadServerHandler(
 export function fakeOneShot503ServerHandler(
   fakeMetadata: Partial<Metadata> = defaultFakeMetadata
 ): RequestHandler {
-  function statusHeaders(status: string, existing?: Headers): Headers {
+  function statusHeaders(status: string, existing?: HeadersInit): Headers {
     if (existing) {
-      existing['X-Goog-Upload-Status'] = status;
-      return existing;
+      const headers = new Headers(existing);
+      headers.set('X-Goog-Upload-Status', status);
+      return headers;
     } else {
-      return { 'X-Goog-Upload-Status': status };
+      return new Headers({ 'X-Goog-Upload-Status': status });
     }
   }
 
   function handler(
     url: string,
     method: string,
-    content?: ArrayBufferView | Blob | string | null,
-    headers?: Headers
+    content?: BodyInit | string | null,
+    headers?: HeadersInit
   ): Response {
     method = method || 'GET';
     content = content || '';
     headers = headers || {};
 
-    return {
+    return new Response(JSON.stringify(fakeMetadata), {
       status: 503,
-      body: JSON.stringify(fakeMetadata),
       headers: statusHeaders('final')
-    };
+    });
   }
   return handler;
 }

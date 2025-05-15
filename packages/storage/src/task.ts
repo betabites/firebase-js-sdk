@@ -23,7 +23,7 @@ import {
   canceled,
   StorageErrorCode,
   StorageError,
-  retryLimitExceeded, unknown
+  retryLimitExceeded,
 } from './implementation/error';
 import {
   InternalTaskState,
@@ -39,10 +39,9 @@ import {
   StorageObserver as StorageObserverInternal,
   NextFn
 } from './implementation/observer';
-import { Request } from './implementation/request';
 import { UploadTaskSnapshot, StorageObserver } from './public-types';
 import { async as fbsAsync } from './implementation/async';
-import { Mappings, getMappings, fromResourceString } from './implementation/metadata';
+import { Mappings, getMappings } from './implementation/metadata';
 import {
   createResumableUpload,
   getResumableUploadStatus,
@@ -53,7 +52,6 @@ import {
   multipartUpload
 } from './implementation/requests';
 import { Reference } from './reference';
-import { newTextConnection } from './platform/connection';
 import { isRetryStatusCode } from './implementation/utils';
 import { CompleteFn } from '@firebase/util';
 import { DEFAULT_MIN_SLEEP_TIME_MILLIS } from './implementation/constants';

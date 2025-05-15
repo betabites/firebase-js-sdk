@@ -284,8 +284,7 @@ export function deleteObject(
   const method = 'DELETE';
   const timeout = service.maxOperationRetryTime;
 
-  function handler(res: Response): void {}
-  const requestInfo = new RequestInfo(url, method, handler, timeout);
+  const requestInfo = new RequestInfo(url, method, () => {}, timeout);
   requestInfo.successCodes = [200, 204];
   requestInfo.errorHandler = objectErrorHandler(location);
   return requestInfo;

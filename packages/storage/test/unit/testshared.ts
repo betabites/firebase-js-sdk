@@ -140,6 +140,34 @@ export function fakeXhrIo<I extends ConnectionType = string>(
   return fakeConnection as Connection<I>;
 }
 
+export function fakeResponse(
+  headers: Headers,
+  status: number = 200
+): Response {
+  const lower: Headers = {};
+  for (const [key, value] of Object.entries(headers)) {
+    lower[key.toLowerCase()] = value.toString();
+  }
+
+  const fakeConnection: any = {
+    getResponseHeader(name: string): string {
+      const lowerName = name.toLowerCase();
+      if (lower.hasOwnProperty(lowerName)) {
+        return lower[lowerName];
+      } else {
+        throw new Error('No such header ' + name);
+      }
+    },
+    getStatus(): number {
+      return status;
+    }
+  };
+
+  return new Response("", {
+    status, headers
+  });
+}
+
 /**
  * Binds ignoring types. Used to test calls involving improper arguments.
  */

@@ -14,11 +14,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import {
-  ErrorCode,
-  Headers,
-  Connection
-} from '../../src/implementation/connection';
+// import {
+//   ErrorCode,
+//   Headers,
+//   Connection
+// } from '../../src/implementation/connection';
 import { StorageError, StorageErrorCode } from '../../src/implementation/error';
 
 export type SendHook = (

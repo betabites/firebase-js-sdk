@@ -17,7 +17,7 @@
 import { expect, use } from 'chai';
 import * as sinon from 'sinon';
 import { TaskEvent } from '../../src/implementation/taskenums';
-import { Headers } from '../../src/implementation/connection';
+// import { Headers } from '../../src/implementation/connection';
 import {
   FirebaseStorageImpl,
   ref,
@@ -34,7 +34,7 @@ import {
 } from '../../src/reference';
 import { Location } from '../../src/implementation/location';
 import { newTestConnection, TestingConnection } from './connection';
-import { injectTestConnection } from '../../src/platform/connection';
+// import { injectTestConnection } from '../../src/platform/connection';
 import sinonChai from 'sinon-chai';
 
 const fakeAppGs = testShared.makeFakeApp('gs://mybucket');

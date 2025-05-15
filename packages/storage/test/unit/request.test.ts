@@ -16,7 +16,7 @@
  */
 import { assert } from 'chai';
 import * as sinon from 'sinon';
-import { makeRequest } from '../../src/implementation/request';
+// import { makeRequest } from '../../src/implementation/request';
 import { RequestInfo } from '../../src/implementation/requestinfo';
 import { TestingConnection, newTestConnection } from './connection';
 

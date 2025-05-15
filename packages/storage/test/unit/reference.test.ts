@@ -17,7 +17,7 @@
 import { expect } from 'chai';
 import { FirebaseApp } from '@firebase/app-types';
 import { StringFormat } from '../../src/implementation/string';
-import { Headers } from '../../src/implementation/connection';
+// import { Headers } from '../../src/implementation/connection';
 import { Metadata } from '../../src/metadata';
 import {
   Reference,
@@ -39,7 +39,7 @@ import { Provider } from '@firebase/component';
 import { AppCheckInternalComponentName } from '@firebase/app-check-interop-types';
 import { fakeServerHandler, storageServiceWithHandler } from './testshared';
 import { decodeUint8Array } from '../../src/platform/base64';
-import { injectTestConnection } from '../../src/platform/connection';
+// import { injectTestConnection } from '../../src/platform/connection';
 
 /* eslint-disable @typescript-eslint/no-floating-promises */
 function makeFakeService(

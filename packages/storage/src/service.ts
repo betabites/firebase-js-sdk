@@ -329,7 +329,9 @@ export class FirebaseStorageImpl implements FirebaseStorage {
       return new Promise<Awaited<O>>((resolve, reject) => reject(appDeleted()));
     }
 
-    const params = new URLSearchParams(requestInfo.urlParams as Record<string, string>);
+    const params = new URLSearchParams(
+      requestInfo.urlParams as Record<string, string>
+    );
     const headers = new Headers(requestInfo.headers);
     if (this._appId) {
       headers.set('X-Firebase-GMPID', this._appId);
@@ -340,12 +342,17 @@ export class FirebaseStorageImpl implements FirebaseStorage {
     if (appCheckToken) {
       headers.set('X-Firebase-AppCheck', appCheckToken);
     }
-    headers.set('X-Firebase-Storage-Version', 'webjs/' + (this._firebaseVersion ?? 'AppManager'));
+    headers.set(
+      'X-Firebase-Storage-Version',
+      'webjs/' + (this._firebaseVersion ?? 'AppManager')
+    );
     const request = fetch(`${requestInfo.url}?${params.toString()}`, {
       ...requestInfo,
       headers,
       signal: abortSignal
-    }).then(res => requestInfo.handler(res)).then(d => d as Awaited<O>);
+    })
+      .then(res => requestInfo.handler(res))
+      .then(d => d as Awaited<O>);
 
     this._requests.add(request);
     // Request removes itself from set when complete.
@@ -357,17 +364,13 @@ export class FirebaseStorageImpl implements FirebaseStorage {
   }
 
   async makeRequestWithTokens<O>(
-    requestInfo: RequestInfo<O>,
+    requestInfo: RequestInfo<O>
   ): Promise<Awaited<O>> {
     const [authToken, appCheckToken] = await Promise.all([
       this._getAuthToken(),
       this._getAppCheckToken()
     ]);
 
-    return this._makeRequest(
-      requestInfo,
-      authToken,
-      appCheckToken
-    );
+    return this._makeRequest(requestInfo, authToken, appCheckToken);
   }
 }

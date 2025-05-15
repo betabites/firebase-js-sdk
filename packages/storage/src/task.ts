@@ -23,7 +23,7 @@ import {
   canceled,
   StorageErrorCode,
   StorageError,
-  retryLimitExceeded,
+  retryLimitExceeded
 } from './implementation/error';
 import {
   InternalTaskState,
@@ -311,7 +311,7 @@ export class UploadTask {
       const uploadRequest = this._ref.storage._makeRequest(
         requestInfo,
         authToken,
-        appCheckToken,
+        appCheckToken
         // /*retry=*/ false // Upload requests should not be retried as each retry should be preceded by another query request. Which is handled in this file.
       );
       this._request = uploadRequest;
@@ -351,12 +351,11 @@ export class UploadTask {
         appCheckToken
       );
       this._request = metadataRequest;
-      metadataRequest
-        .then(metadata => {
-          this._request = undefined;
-          this._metadata = metadata;
-          this._transition(InternalTaskState.SUCCESS);
-        }, this._metadataErrorHandler);
+      metadataRequest.then(metadata => {
+        this._request = undefined;
+        this._metadata = metadata;
+        this._transition(InternalTaskState.SUCCESS);
+      }, this._metadataErrorHandler);
     });
   }
 

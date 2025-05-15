@@ -47,6 +47,7 @@ import {
   pingServer,
   updateEmulatorBanner
 } from '@firebase/util';
+import { makeRequest, type Awaited } from './implementation/request';
 
 export function isUrl(path?: string): boolean {
   return /^[A-Za-z]+:\/\//.test(path as string);
@@ -88,7 +89,6 @@ function refFromPath(
   }
 }
 
-type Awaited<T> = T extends Promise<infer O> ? Awaited<O> : T;
 
 /**
  * Returns a storage Reference for the given url.
@@ -163,10 +163,6 @@ export function connectStorageEmulator(
   }
 }
 
-let fetchOverride = fetch;
-export function injectTestFetch(fetch: typeof fetchOverride): void {
-  fetchOverride = fetch;
-}
 
 /**
  * A service that provides Firebase Storage Reference instances.
@@ -330,37 +326,22 @@ export class FirebaseStorageImpl implements FirebaseStorage {
     requestInfo: RequestInfo<O>,
     authToken: string | null,
     appCheckToken: string | null,
+    isUsingEmulator: boolean,
     abortSignal?: AbortSignal
   ): Promise<Awaited<O>> {
     if (this.aborted) {
       return new Promise<Awaited<O>>((resolve, reject) => reject(appDeleted()));
     }
 
-    const params = new URLSearchParams(
-      requestInfo.urlParams as Record<string, string>
+    const request = makeRequest(
+      requestInfo,
+      authToken,
+      this._appId,
+      appCheckToken,
+      this._firebaseVersion,
+      isUsingEmulator,
+      abortSignal
     );
-    const headers = new Headers(requestInfo.headers);
-    if (this._appId) {
-      headers.set('X-Firebase-GMPID', this._appId);
-    }
-    if (authToken) {
-      headers.set('X-Firebase-GMPID', authToken);
-    }
-    if (appCheckToken) {
-      headers.set('X-Firebase-AppCheck', appCheckToken);
-    }
-    headers.set(
-      'X-Firebase-Storage-Version',
-      'webjs/' + (this._firebaseVersion ?? 'AppManager')
-    );
-    const request = fetchOverride(`${requestInfo.url}?${params.toString()}`, {
-      ...requestInfo,
-      headers,
-      signal: abortSignal
-    })
-      .then(res => requestInfo.handler(res))
-      .then(d => d as Awaited<O>);
-
     this._requests.add(request);
     // Request removes itself from set when complete.
     request.then(
@@ -378,6 +359,6 @@ export class FirebaseStorageImpl implements FirebaseStorage {
       this._getAppCheckToken()
     ]);
 
-    return this._makeRequest(requestInfo, authToken, appCheckToken);
+    return this._makeRequest(requestInfo, authToken, appCheckToken, false);
   }
 }

@@ -23,7 +23,7 @@ import {
   canceled,
   StorageErrorCode,
   StorageError,
-  retryLimitExceeded
+  retryLimitExceeded, unknown
 } from './implementation/error';
 import {
   InternalTaskState,
@@ -42,7 +42,7 @@ import {
 import { Request } from './implementation/request';
 import { UploadTaskSnapshot, StorageObserver } from './public-types';
 import { async as fbsAsync } from './implementation/async';
-import { Mappings, getMappings } from './implementation/metadata';
+import { Mappings, getMappings, fromResourceString } from './implementation/metadata';
 import {
   createResumableUpload,
   getResumableUploadStatus,
@@ -88,7 +88,7 @@ export class UploadTask {
   _state: InternalTaskState;
   private _error?: StorageError = undefined;
   private _uploadUrl?: string = undefined;
-  private _request?: Request<unknown> = undefined;
+  private _request?: Promise<unknown> = undefined;
   private _chunkMultiplier: number = 1;
   private _errorHandler: (p1: StorageError) => void;
   private _metadataErrorHandler: (p1: StorageError) => void;
@@ -96,6 +96,7 @@ export class UploadTask {
   private _reject?: (p1: StorageError) => void = undefined;
   private pendingTimeout?: ReturnType<typeof setTimeout>;
   private _promise: Promise<UploadTaskSnapshot>;
+  private _abortController = new AbortController();
 
   private sleepTime: number;
 
@@ -240,12 +241,11 @@ export class UploadTask {
       );
       const createRequest = this._ref.storage._makeRequest(
         requestInfo,
-        newTextConnection,
         authToken,
         appCheckToken
       );
       this._request = createRequest;
-      createRequest.getPromise().then((url: string) => {
+      createRequest.then((url: string) => {
         this._request = undefined;
         this._uploadUrl = url;
         this._needToFetchStatus = false;
@@ -266,12 +266,11 @@ export class UploadTask {
       );
       const statusRequest = this._ref.storage._makeRequest(
         requestInfo,
-        newTextConnection,
         authToken,
         appCheckToken
       );
       this._request = statusRequest;
-      statusRequest.getPromise().then(status => {
+      statusRequest.then(status => {
         status = status as ResumableUploadStatus;
         this._request = undefined;
         this._updateProgress(status.current);
@@ -313,13 +312,12 @@ export class UploadTask {
       }
       const uploadRequest = this._ref.storage._makeRequest(
         requestInfo,
-        newTextConnection,
         authToken,
         appCheckToken,
-        /*retry=*/ false // Upload requests should not be retried as each retry should be preceded by another query request. Which is handled in this file.
+        // /*retry=*/ false // Upload requests should not be retried as each retry should be preceded by another query request. Which is handled in this file.
       );
       this._request = uploadRequest;
-      uploadRequest.getPromise().then((newStatus: ResumableUploadStatus) => {
+      uploadRequest.then((newStatus: ResumableUploadStatus) => {
         this._increaseMultiplier();
         this._request = undefined;
         this._updateProgress(newStatus.current);
@@ -351,16 +349,16 @@ export class UploadTask {
       );
       const metadataRequest = this._ref.storage._makeRequest(
         requestInfo,
-        newTextConnection,
         authToken,
         appCheckToken
       );
       this._request = metadataRequest;
-      metadataRequest.getPromise().then(metadata => {
-        this._request = undefined;
-        this._metadata = metadata;
-        this._transition(InternalTaskState.SUCCESS);
-      }, this._metadataErrorHandler);
+      metadataRequest
+        .then(metadata => {
+          this._request = undefined;
+          this._metadata = metadata;
+          this._transition(InternalTaskState.SUCCESS);
+        }, this._metadataErrorHandler);
     });
   }
 
@@ -375,12 +373,11 @@ export class UploadTask {
       );
       const multipartRequest = this._ref.storage._makeRequest(
         requestInfo,
-        newTextConnection,
         authToken,
         appCheckToken
       );
       this._request = multipartRequest;
-      multipartRequest.getPromise().then(metadata => {
+      multipartRequest.then(metadata => {
         this._request = undefined;
         this._metadata = metadata;
         this._updateProgress(this._blob.size());
@@ -413,7 +410,8 @@ export class UploadTask {
         //        this.state_ === InternalTaskState.PAUSING);
         this._state = state;
         if (this._request !== undefined) {
-          this._request.cancel();
+          this._abortController.abort();
+          this._abortController = new AbortController();
         } else if (this.pendingTimeout) {
           clearTimeout(this.pendingTimeout);
           this.pendingTimeout = undefined;

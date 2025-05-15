@@ -31,10 +31,7 @@ export interface UrlParams {
  * @param I - the type of the backend's network response
  * @param O - the output response type used by the rest of the SDK.
  */
-export type RequestHandler<I extends ConnectionType, O> = (
-  connection: Connection<I>,
-  response: I
-) => O;
+export type RequestHandler<O> = (res: Response) => O;
 
 /** A function to handle an error. */
 export type ErrorHandler = (
@@ -48,7 +45,7 @@ export type ErrorHandler = (
  * @param I - the type of the backend's network response.
  * @param O - the output response type used by the rest of the SDK.
  */
-export class RequestInfo<I extends ConnectionType, O> {
+export class RequestInfo<O> {
   urlParams: UrlParams = {};
   headers: Headers = {};
   body: Blob | string | Uint8Array | null = null;
@@ -72,7 +69,7 @@ export class RequestInfo<I extends ConnectionType, O> {
      * Note: The XhrIo passed to this function may be reused after this callback
      * returns. Do not keep a reference to it in any way.
      */
-    public handler: RequestHandler<I, O>,
+    public handler: RequestHandler<O>,
     public timeout: number
   ) {}
 }

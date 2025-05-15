@@ -33,7 +33,7 @@ import {
   ResumableUploadStatus,
   continueResumableUpload,
   RESUMABLE_UPLOAD_CHUNK_SIZE,
-  getBytes
+  getResponse
 } from '../../src/implementation/requests';
 import { makeUrl } from '../../src/implementation/url';
 import { unknown, StorageErrorCode } from '../../src/implementation/error';
@@ -340,7 +340,7 @@ describe('Firebase Storage > Requests', () => {
     assert.equal(url, downloadUrlFromServerResource);
   });
   it('getBytes handler', () => {
-    const requestInfo = getBytes(storageService, locationNormal);
+    const requestInfo = getResponse(storageService, locationNormal);
     const bytes = requestInfo.handler(
       fakeXhrIo({}),
       new Uint8Array([1, 128, 255])

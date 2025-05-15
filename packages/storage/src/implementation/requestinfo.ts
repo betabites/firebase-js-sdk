@@ -35,8 +35,8 @@ export type RequestHandler<O> = (res: Response) => O;
 
 /** A function to handle an error. */
 export type ErrorHandler = (
-  connection: Connection<ConnectionType>,
-  response: StorageError
+  response: Response,
+  error: StorageError
 ) => StorageError;
 
 /**

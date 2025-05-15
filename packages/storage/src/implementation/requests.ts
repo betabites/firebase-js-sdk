@@ -44,7 +44,6 @@ import { fromResponseString } from './list';
 import { RequestInfo, UrlParams } from './requestinfo';
 import { isString } from './type';
 import { makeUrl } from './url';
-import { Connection, ConnectionType } from './connection';
 import { FirebaseStorageImpl } from '../service';
 
 /**
@@ -100,34 +99,34 @@ export function downloadUrlHandler(
 
 export function sharedErrorHandler(
   location: Location
-): (p1: Connection<ConnectionType>, p2: StorageError) => StorageError {
+): (p1: Response, p2: StorageError) => StorageError {
   function errorHandler(
-    xhr: Connection<ConnectionType>,
+    res: Response,
     err: StorageError
   ): StorageError {
     let newErr: StorageError;
-    if (xhr.getStatus() === 401) {
+    if (res.status === 401) {
       if (
         // This exact message string is the only consistent part of the
         // server's error response that identifies it as an App Check error.
-        xhr.getErrorText().includes('Firebase App Check token is invalid')
+        res.statusText.includes('Firebase App Check token is invalid')
       ) {
         newErr = unauthorizedApp();
       } else {
         newErr = unauthenticated();
       }
     } else {
-      if (xhr.getStatus() === 402) {
+      if (res.status === 402) {
         newErr = quotaExceeded(location.bucket);
       } else {
-        if (xhr.getStatus() === 403) {
+        if (res.status === 403) {
           newErr = unauthorized(location.path);
         } else {
           newErr = err;
         }
       }
     }
-    newErr.status = xhr.getStatus();
+    newErr.status = res.status;
     newErr.serverResponse = err.serverResponse;
     return newErr;
   }
@@ -136,15 +135,15 @@ export function sharedErrorHandler(
 
 export function objectErrorHandler(
   location: Location
-): (p1: Connection<ConnectionType>, p2: StorageError) => StorageError {
+): (p1: Response, p2: StorageError) => StorageError {
   const shared = sharedErrorHandler(location);
 
   function errorHandler(
-    xhr: Connection<ConnectionType>,
+    res: Response,
     err: StorageError
   ): StorageError {
-    let newErr = shared(xhr, err);
-    if (xhr.getStatus() === 404) {
+    let newErr = shared(res, err);
+    if (res.status === 404) {
       newErr = objectNotFound(location.path);
     }
     newErr.serverResponse = err.serverResponse;

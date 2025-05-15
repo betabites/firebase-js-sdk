@@ -99,7 +99,7 @@ export function ref(storage: FirebaseStorageImpl, url?: string): Reference;
  * Returns a storage Reference for the given path in the
  * default bucket.
  * @param storageOrRef - `Storage` service or storage `Reference`.
- * @param pathOrUrlStorage - path. If empty, returns root reference (if Storage
+ * @param path - path. If empty, returns root reference (if Storage
  * instance provided) or returns same reference (if Reference provided).
  * @public
  */

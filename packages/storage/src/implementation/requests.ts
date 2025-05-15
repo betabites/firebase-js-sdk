@@ -219,7 +219,7 @@ export function getResponse(
   );
   requestInfo.errorHandler = objectErrorHandler(location);
   if (maxDownloadSizeBytes !== undefined) {
-    requestInfo.headers['Range'] = `bytes=0-${maxDownloadSizeBytes}`;
+    requestInfo.headers.set('Range', `bytes=0-${maxDownloadSizeBytes}`);
     requestInfo.successCodes = [200 /* OK */, 206 /* Partial Content */];
   }
   return requestInfo;
@@ -254,7 +254,7 @@ export function updateMetadata(
   const url = makeUrl(urlPart, service.host, service._protocol);
   const method = 'PATCH';
   const body = toResourceString(metadata, mappings);
-  const headers = { 'Content-Type': 'application/json; charset=utf-8' };
+  const headers = new Headers({ 'Content-Type': 'application/json; charset=utf-8' });
   const timeout = service.maxOperationRetryTime;
   const requestInfo = new RequestInfo(
     url,
@@ -319,9 +319,9 @@ export function multipartUpload(
   metadata?: Metadata | null
 ): RequestInfo<Promise<Metadata>> {
   const urlPart = location.bucketOnlyServerUrl();
-  const headers: { [prop: string]: string } = {
+  const headers = new Headers({
     'X-Goog-Upload-Protocol': 'multipart'
-  };
+  });
 
   function genBoundary(): string {
     let str = '';
@@ -331,7 +331,7 @@ export function multipartUpload(
     return str;
   }
   const boundary = genBoundary();
-  headers['Content-Type'] = 'multipart/related; boundary=' + boundary;
+  headers.set('Content-Type', 'multipart/related; boundary=' + boundary);
   const metadata_ = metadataForUpload_(location, blob, metadata);
   const metadataString = toResourceString(metadata_, mappings);
   const preBlobPart =
@@ -412,13 +412,13 @@ export function createResumableUpload(
   const urlParams: UrlParams = { name: metadataForUpload['fullPath']! };
   const url = makeUrl(urlPart, service.host, service._protocol);
   const method = 'POST';
-  const headers = {
+  const headers = new Headers({
     'X-Goog-Upload-Protocol': 'resumable',
     'X-Goog-Upload-Command': 'start',
     'X-Goog-Upload-Header-Content-Length': `${blob.size()}`,
     'X-Goog-Upload-Header-Content-Type': metadataForUpload['contentType']!,
     'Content-Type': 'application/json; charset=utf-8'
-  };
+  });
   const body = toResourceString(metadataForUpload, mappings);
   const timeout = service.maxUploadRetryTime;
 
@@ -448,7 +448,7 @@ export function getResumableUploadStatus(
   url: string,
   blob: FbsBlob
 ): RequestInfo<ResumableUploadStatus> {
-  const headers = { 'X-Goog-Upload-Command': 'query' };
+  const headers = new Headers({ 'X-Goog-Upload-Command': 'query' });
 
   function handler(res: Response): ResumableUploadStatus {
     const status = checkResumeHeader_(res, ['active', 'final']);
@@ -524,10 +524,10 @@ export function continueResumableUpload(
   } else {
     uploadCommand = 'upload';
   }
-  const headers = {
+  const headers = new Headers({
     'X-Goog-Upload-Command': uploadCommand,
     'X-Goog-Upload-Offset': `${status_.current}`
-  };
+  });
   const body = blob.slice(startByte, endByte);
   if (body === null) {
     throw cannotSliceBlob();

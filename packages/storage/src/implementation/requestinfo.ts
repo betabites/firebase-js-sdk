@@ -46,7 +46,7 @@ export type ErrorHandler = (
  */
 export class RequestInfo<O> {
   urlParams: UrlParams = {};
-  headers: Headers = {};
+  headers: Headers = new Headers();
   body: Blob | string | Uint8Array | null = null;
   errorHandler: ErrorHandler | null = null;
 

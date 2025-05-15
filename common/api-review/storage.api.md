@@ -59,6 +59,8 @@ export class _FirebaseStorageImpl implements FirebaseStorage {
     app: FirebaseApp, _authProvider: Provider<FirebaseAuthInternalName>,
     _appCheckProvider: Provider<AppCheckInternalComponentName>,
     _url?: string | undefined, _firebaseVersion?: string | undefined, _isUsingEmulator?: boolean);
+    // (undocumented)
+    get aborted(): boolean;
     readonly app: FirebaseApp;
     // (undocumented)
     readonly _appCheckProvider: Provider<AppCheckInternalComponentName>;
@@ -79,15 +81,13 @@ export class _FirebaseStorageImpl implements FirebaseStorage {
     set host(host: string);
     // (undocumented)
     _isUsingEmulator: boolean;
-    // Warning: (ae-forgotten-export) The symbol "ConnectionType" needs to be exported by the entry point index.d.ts
     // Warning: (ae-forgotten-export) The symbol "RequestInfo" needs to be exported by the entry point index.d.ts
-    // Warning: (ae-forgotten-export) The symbol "Connection" needs to be exported by the entry point index.d.ts
-    // Warning: (ae-forgotten-export) The symbol "Request" needs to be exported by the entry point index.d.ts
+    // Warning: (ae-forgotten-export) The symbol "Awaited" needs to be exported by the entry point index.d.ts
     //
     // (undocumented)
-    _makeRequest<I extends ConnectionType, O>(requestInfo: RequestInfo_2<I, O>, requestFactory: () => Connection<I>, authToken: string | null, appCheckToken: string | null, retry?: boolean): Request_2<O>;
+    _makeRequest<O>(requestInfo: RequestInfo_2<O>, authToken: string | null, appCheckToken: string | null, abortSignal?: AbortSignal): Promise<Awaited<O>>;
     // (undocumented)
-    makeRequestWithTokens<I extends ConnectionType, O>(requestInfo: RequestInfo_2<I, O>, requestFactory: () => Connection<I>): Promise<O>;
+    makeRequestWithTokens<O>(requestInfo: RequestInfo_2<O>): Promise<Awaited<O>>;
     _makeStorageReference(loc: _Location): _Reference;
     get maxOperationRetryTime(): number;
     set maxOperationRetryTime(time: number);

@@ -19,8 +19,18 @@
  * Checks whether host is a cloud workstation or not.
  * @public
  */
-export function isCloudWorkstation(host: string): boolean {
-  return host.endsWith('.cloudworkstations.dev');
+export function isCloudWorkstation(host: string | URL | Request): boolean {
+  let url: URL;
+  if (typeof host === 'string') {
+    url = new URL(host);
+  } else if (host instanceof URL) {
+    url = host;
+  } else if (host instanceof Request) {
+    url = new URL(host.url);
+  } else {
+    throw new Error('Invalid host');
+  }
+  return url.host.endsWith('.cloudworkstations.dev');
 }
 
 /**

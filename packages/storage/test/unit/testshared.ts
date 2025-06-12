@@ -38,7 +38,6 @@ import {
 import { AppCheckInternalComponentName } from '@firebase/app-check-interop-types';
 import { FirebaseStorageImpl } from '../../src/service';
 import { Metadata } from '../../src/metadata';
-import { injectTestConnection } from '../../src/platform/connection';
 
 export const authToken = 'totally-legit-auth-token';
 export const appCheckToken = 'totally-shady-token';

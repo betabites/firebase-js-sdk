@@ -24,13 +24,18 @@ import { Location } from './implementation/location';
 import { getMappings } from './implementation/metadata';
 import { child, lastComponent, parent } from './implementation/path';
 import {
-  deleteObject as requestsDeleteObject,
-  getBytes,
-  getDownloadUrl as requestsGetDownloadUrl,
-  getMetadata as requestsGetMetadata,
-  list as requestsList,
-  multipartUpload,
-  updateMetadata as requestsUpdateMetadata
+  buildDeleteObjectRequest as requestsDeleteObject,
+  buildBytesRequest,
+  buildDownloadUrlRequest as requestsGetDownloadUrl,
+  buildMetadataRequest as requestsGetMetadata,
+  buildListRequest as requestsList,
+  buildMultipartUploadRequest,
+  buildUpdateMetadataRequest as requestsUpdateMetadata,
+  objectErrorHandler,
+  metadataHandler,
+  sharedErrorHandler,
+  listHandler,
+  getBytesResponseHandler, downloadUrlHandler
 } from './implementation/requests';
 import { ListOptions, UploadResult } from './public-types';
 import { dataFromString, StringFormat } from './implementation/string';
@@ -40,13 +45,6 @@ import { ListResult } from './list';
 import { UploadTask } from './task';
 import { invalidRootOperation, noDownloadURL } from './implementation/error';
 import { validateNumber } from './implementation/type';
-import {
-  newBlobConnection,
-  newBytesConnection,
-  newStreamConnection,
-  newTextConnection
-} from './platform/connection';
-import { RequestInfo } from './implementation/requestinfo';
 
 /**
  * Provides methods to interact with a bucket in the Firebase Storage service.
@@ -159,13 +157,14 @@ export function getBytesInternal(
   maxDownloadSizeBytes?: number
 ): Promise<ArrayBuffer> {
   ref._throwIfRoot('getBytes');
-  const requestInfo = getBytes(
+  const requestInfo = buildBytesRequest(
     ref.storage,
     ref._location,
     maxDownloadSizeBytes
   );
   return ref.storage
-    .makeRequestWithTokens(requestInfo, newBytesConnection)
+    .makeRequestWithTokens(requestInfo)
+    .then(res => res.arrayBuffer())
     .then(bytes =>
       maxDownloadSizeBytes !== undefined
         ? // GCS may not honor the Range header for small files
@@ -183,13 +182,14 @@ export function getBlobInternal(
   maxDownloadSizeBytes?: number
 ): Promise<Blob> {
   ref._throwIfRoot('getBlob');
-  const requestInfo = getBytes(
+  const requestInfo = buildBytesRequest(
     ref.storage,
     ref._location,
     maxDownloadSizeBytes
   );
   return ref.storage
-    .makeRequestWithTokens(requestInfo, newBlobConnection)
+    .makeRequestWithTokens(requestInfo)
+    .then(res => getBytesResponseHandler(res, ref._location))
     .then(blob =>
       maxDownloadSizeBytes !== undefined
         ? // GCS may not honor the Range header for small files
@@ -204,7 +204,7 @@ export function getStreamInternal(
   maxDownloadSizeBytes?: number
 ): ReadableStream {
   ref._throwIfRoot('getStream');
-  const requestInfo: RequestInfo<ReadableStream, ReadableStream> = getBytes(
+  const requestInfo = buildBytesRequest(
     ref.storage,
     ref._location,
     maxDownloadSizeBytes
@@ -233,8 +233,14 @@ export function getStreamInternal(
       : new TransformStream(); // The default transformer forwards all chunks to its readable side
 
   ref.storage
-    .makeRequestWithTokens(requestInfo, newStreamConnection)
-    .then(readableStream => readableStream.pipeThrough(result))
+    .makeRequestWithTokens(requestInfo)
+    .then(res => {
+      if (!res.body) {
+        throw new Error('Response missing body');
+      }
+      return res.body;
+    })
+    .then(stream => stream.pipeThrough(result))
     .catch(err => result.writable.abort(err));
 
   return result.readable;
@@ -255,7 +261,7 @@ export function uploadBytes(
   metadata?: Metadata
 ): Promise<UploadResult> {
   ref._throwIfRoot('uploadBytes');
-  const requestInfo = multipartUpload(
+  const requestInfo = buildMultipartUploadRequest(
     ref.storage,
     ref._location,
     getMappings(),
@@ -263,7 +269,9 @@ export function uploadBytes(
     metadata
   );
   return ref.storage
-    .makeRequestWithTokens(requestInfo, newTextConnection)
+    .makeRequestWithTokens(requestInfo)
+    .then(res => sharedErrorHandler(res, ref._location))
+    .then(res => metadataHandler(res, ref.storage, getMappings()))
     .then(finalMetadata => {
       return {
         metadata: finalMetadata,
@@ -409,7 +417,9 @@ export function list(
     op.pageToken,
     op.maxResults
   );
-  return ref.storage.makeRequestWithTokens(requestInfo, newTextConnection);
+  return ref.storage.makeRequestWithTokens(requestInfo)
+    .then(res => sharedErrorHandler(res, ref._location))
+    .then(res => listHandler(res, ref.storage, ref.bucket));
 }
 
 /**
@@ -421,12 +431,16 @@ export function list(
  */
 export function getMetadata(ref: Reference): Promise<Metadata> {
   ref._throwIfRoot('getMetadata');
+  const mappings = getMappings();
   const requestInfo = requestsGetMetadata(
     ref.storage,
     ref._location,
-    getMappings()
+    mappings
   );
-  return ref.storage.makeRequestWithTokens(requestInfo, newTextConnection);
+
+  return ref.storage.makeRequestWithTokens(requestInfo)
+    .then(res => objectErrorHandler(res, ref._location))
+    .then(res => metadataHandler(res, ref.storage,mappings));
 }
 
 /**
@@ -451,7 +465,9 @@ export function updateMetadata(
     metadata,
     getMappings()
   );
-  return ref.storage.makeRequestWithTokens(requestInfo, newTextConnection);
+  return ref.storage.makeRequestWithTokens(requestInfo)
+    .then(res => objectErrorHandler(res, ref._location))
+    .then(res => metadataHandler(res, ref.storage, getMappings()));
 }
 
 /**
@@ -462,13 +478,15 @@ export function updateMetadata(
  */
 export function getDownloadURL(ref: Reference): Promise<string> {
   ref._throwIfRoot('getDownloadURL');
-  const requestInfo = requestsGetDownloadUrl(
+  const mappings = getMappings();
+  const request = requestsGetDownloadUrl(
     ref.storage,
     ref._location,
-    getMappings()
+    mappings
   );
   return ref.storage
-    .makeRequestWithTokens(requestInfo, newTextConnection)
+    .makeRequestWithTokens(request)
+    .then(res => downloadUrlHandler(res, ref.storage, mappings))
     .then(url => {
       if (url === null) {
         throw noDownloadURL();
@@ -483,10 +501,11 @@ export function getDownloadURL(ref: Reference): Promise<string> {
  * @param ref - StorageReference for object to delete.
  * @returns A `Promise` that resolves if the deletion succeeds.
  */
-export function deleteObject(ref: Reference): Promise<void> {
+export function deleteObject(ref: Reference): Promise<Response> {
   ref._throwIfRoot('deleteObject');
   const requestInfo = requestsDeleteObject(ref.storage, ref._location);
-  return ref.storage.makeRequestWithTokens(requestInfo, newTextConnection);
+  return ref.storage.makeRequestWithTokens(requestInfo)
+    .then(res => sharedErrorHandler(res, ref._location));
 }
 
 /**

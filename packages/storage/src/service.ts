@@ -343,7 +343,7 @@ export class FirebaseStorageImpl implements FirebaseStorage {
         },
         request.headers
       );
-      return makeRequest(request, retry ? 5 : 1, {
+      return makeRequest(request, {
         isUsingEmulator: this._isUsingEmulator
       });
     } else {

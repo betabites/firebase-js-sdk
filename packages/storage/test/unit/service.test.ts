@@ -34,7 +34,6 @@ import {
 } from '../../src/reference';
 import { Location } from '../../src/implementation/location';
 import { newTestConnection, TestingConnection } from './connection';
-import { injectTestConnection } from '../../src/platform/connection';
 import sinonChai from 'sinon-chai';
 
 const fakeAppGs = testShared.makeFakeApp('gs://mybucket');

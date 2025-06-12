@@ -16,9 +16,6 @@
  */
 
 import { Location } from './implementation/location';
-import { FailRequest } from './implementation/failrequest';
-import { Request, makeRequest } from './implementation/request';
-import { RequestInfo } from './implementation/requestinfo';
 import { Reference, _getChild } from './reference';
 import { Provider } from '@firebase/component';
 import { FirebaseAuthInternalName } from '@firebase/auth-interop-types';
@@ -49,7 +46,7 @@ import {
   pingServer,
   updateEmulatorBanner
 } from '@firebase/util';
-import { Connection, ConnectionType } from './implementation/connection';
+import { buildHeaders, makeRequest } from './implementation/request';
 
 export function isUrl(path?: string): boolean {
   return /^[A-Za-z]+:\/\//.test(path as string);
@@ -180,11 +177,10 @@ export class FirebaseStorageImpl implements FirebaseStorage {
   private _host: string = DEFAULT_HOST;
   _protocol: string = 'https';
   protected readonly _appId: string | null = null;
-  private readonly _requests: Set<Request<unknown>>;
-  private _deleted: boolean = false;
   private _maxOperationRetryTime: number;
   private _maxUploadRetryTime: number;
   _overrideAuthToken?: string;
+  readonly abortController = new AbortController();
 
   constructor(
     /**
@@ -205,7 +201,6 @@ export class FirebaseStorageImpl implements FirebaseStorage {
   ) {
     this._maxOperationRetryTime = DEFAULT_MAX_OPERATION_RETRY_TIME;
     this._maxUploadRetryTime = DEFAULT_MAX_UPLOAD_RETRY_TIME;
-    this._requests = new Set();
     if (_url != null) {
       this._bucket = Location.makeFromBucketSpec(_url, this._host);
     } else {
@@ -299,10 +294,8 @@ export class FirebaseStorageImpl implements FirebaseStorage {
    * Stop running requests and prevent more from being created.
    */
   _delete(): Promise<void> {
-    if (!this._deleted) {
-      this._deleted = true;
-      this._requests.forEach(request => request.cancel());
-      this._requests.clear();
+    if (!this.abortController.signal.aborted) {
+      this.abortController.abort(appDeleted());
     }
     return Promise.resolve();
   }
@@ -318,41 +311,49 @@ export class FirebaseStorageImpl implements FirebaseStorage {
   /**
    * @param requestInfo - HTTP RequestInfo object
    * @param authToken - Firebase auth token
+   * @param appCheckToken
+   * @param retry
    */
-  _makeRequest<I extends ConnectionType, O>(
-    requestInfo: RequestInfo<I, O>,
-    requestFactory: () => Connection<I>,
+  async _makeRequest(
+    requestInfo: string | URL | Request,
     authToken: string | null,
     appCheckToken: string | null,
     retry = true
-  ): Request<O> {
-    if (!this._deleted) {
-      const request = makeRequest(
-        requestInfo,
-        this._appId,
-        authToken,
-        appCheckToken,
-        requestFactory,
-        this._firebaseVersion,
-        retry,
-        this._isUsingEmulator
+  ): Promise<Response> {
+    if (!this.abortController.signal.aborted) {
+      /**
+       * Append the abort controller. We don't overwrite in-case another section
+       * of code also wants to control the abort flow.
+       */
+      let compositeSignal = this.abortController.signal;
+      if (requestInfo instanceof Request) {
+        compositeSignal = AbortSignal.any([
+          requestInfo.signal,
+          compositeSignal
+        ]);
+      }
+      const request = new Request(requestInfo, {signal: compositeSignal});
+
+      buildHeaders(
+        {
+          appId: this._appId,
+          authToken,
+          appCheckToken,
+          firebaseVersion: this._firebaseVersion
+        },
+        request.headers
       );
-      this._requests.add(request);
-      // Request removes itself from set when complete.
-      request.getPromise().then(
-        () => this._requests.delete(request),
-        () => this._requests.delete(request)
-      );
-      return request;
+      return makeRequest(request, retry ? 5 : 1, {
+        isUsingEmulator: this._isUsingEmulator
+      });
     } else {
-      return new FailRequest(appDeleted());
+      throw appDeleted();
     }
   }
 
-  async makeRequestWithTokens<I extends ConnectionType, O>(
-    requestInfo: RequestInfo<I, O>,
-    requestFactory: () => Connection<I>
-  ): Promise<O> {
+  async makeRequestWithTokens(
+    requestInfo: string | URL | Request,
+  ): Promise<Response> {
     const [authToken, appCheckToken] = await Promise.all([
       this._getAuthToken(),
       this._getAppCheckToken()
@@ -360,9 +361,8 @@ export class FirebaseStorageImpl implements FirebaseStorage {
 
     return this._makeRequest(
       requestInfo,
-      requestFactory,
       authToken,
       appCheckToken
-    ).getPromise();
+    );
   }
 }

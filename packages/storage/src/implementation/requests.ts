@@ -41,11 +41,17 @@ import {
   toResourceString
 } from './metadata';
 import { fromResponseString } from './list';
-import { RequestInfo, UrlParams } from './requestinfo';
 import { isString } from './type';
 import { makeUrl } from './url';
-import { Connection, ConnectionType } from './connection';
 import { FirebaseStorageImpl } from '../service';
+import { satisfies } from 'semver';
+
+/**
+ * @name RequestParser
+ * A function that takes a response as input, then parses the response.
+ * The parser also throws any errors if they were encountered.
+ */
+type RequestParser<T> = (res: Response) => Promise<T>;
 
 /**
  * Throws the UNKNOWN StorageError if cndn is false.
@@ -59,9 +65,13 @@ export function handlerCheck(cndn: boolean): void {
 export function metadataHandler(
   service: FirebaseStorageImpl,
   mappings: Mappings
-): (p1: Connection<string>, p2: string) => Metadata {
-  function handler(xhr: Connection<string>, text: string): Metadata {
-    const metadata = fromResourceString(service, text, mappings);
+): (res: Response) => Promise<Metadata> {
+  async function handler(res: Response): Promise<Metadata> {
+    if (!res.ok) {
+      throw unknown();
+    }
+
+    const metadata = fromResourceString(service, await res.text(), mappings);
     handlerCheck(metadata !== null);
     return metadata as Metadata;
   }
@@ -71,9 +81,13 @@ export function metadataHandler(
 export function listHandler(
   service: FirebaseStorageImpl,
   bucket: string
-): (p1: Connection<string>, p2: string) => ListResult {
-  function handler(xhr: Connection<string>, text: string): ListResult {
-    const listResult = fromResponseString(service, bucket, text);
+): (res: Response) => Promise<ListResult> {
+  async function handler(res: Response): Promise<ListResult> {
+    if (!res.ok) {
+      throw unknown();
+    }
+
+    const listResult = fromResponseString(service, bucket, await res.text());
     handlerCheck(listResult !== null);
     return listResult as ListResult;
   }
@@ -83,8 +97,13 @@ export function listHandler(
 export function downloadUrlHandler(
   service: FirebaseStorageImpl,
   mappings: Mappings
-): (p1: Connection<string>, p2: string) => string | null {
-  function handler(xhr: Connection<string>, text: string): string | null {
+): (res: Response) => Promise<string | null> {
+  async function handler(res: Response): Promise<string | null> {
+    if (!res.ok) {
+      throw unknown();
+    }
+
+    const text = await res.text();
     const metadata = fromResourceString(service, text, mappings);
     handlerCheck(metadata !== null);
     return downloadUrlFromResourceString(
@@ -99,55 +118,45 @@ export function downloadUrlHandler(
 
 export function sharedErrorHandler(
   location: Location
-): (p1: Connection<ConnectionType>, p2: StorageError) => StorageError {
-  function errorHandler(
-    xhr: Connection<ConnectionType>,
-    err: StorageError
-  ): StorageError {
+): (res: Response) => Promise<Response> {
+  async function errorHandler(
+    res: Response,
+  ): Promise<Response> {
+    if (res.ok) {
+      return res;
+    };
     let newErr: StorageError;
-    if (xhr.getStatus() === 401) {
-      if (
-        // This exact message string is the only consistent part of the
-        // server's error response that identifies it as an App Check error.
-        xhr.getErrorText().includes('Firebase App Check token is invalid')
-      ) {
-        newErr = unauthorizedApp();
-      } else {
-        newErr = unauthenticated();
-      }
-    } else {
-      if (xhr.getStatus() === 402) {
-        newErr = quotaExceeded(location.bucket);
-      } else {
-        if (xhr.getStatus() === 403) {
-          newErr = unauthorized(location.path);
-        } else {
-          newErr = err;
+
+    switch (res.status) {
+      case 401:
+        if (res.statusText.includes('Firebase App Check token is invalid')) {
+          throw unauthorizedApp();
         }
-      }
+        throw unauthenticated();
+      case 402:
+        throw quotaExceeded(location.bucket);
+      case 403:
+        throw unauthorized(location.path);
+      default:
+        throw unknown();
     }
-    newErr.status = xhr.getStatus();
-    newErr.serverResponse = err.serverResponse;
-    return newErr;
   }
   return errorHandler;
 }
 
 export function objectErrorHandler(
   location: Location
-): (p1: Connection<ConnectionType>, p2: StorageError) => StorageError {
+): (res: Response) => Promise<Response> {
   const shared = sharedErrorHandler(location);
 
-  function errorHandler(
-    xhr: Connection<ConnectionType>,
-    err: StorageError
-  ): StorageError {
-    let newErr = shared(xhr, err);
-    if (xhr.getStatus() === 404) {
-      newErr = objectNotFound(location.path);
-    }
-    newErr.serverResponse = err.serverResponse;
-    return newErr;
+  function errorHandler(res: Response): Promise<Response> {
+    return shared(res)
+      .catch(e => {
+        if (res.status === 404) {
+          throw objectNotFound(location.path);
+        }
+        throw e;
+      });
   }
   return errorHandler;
 }
@@ -208,21 +217,25 @@ export function list(
   return requestInfo;
 }
 
-export function getBytes<I extends ConnectionType>(
+export function getBytes(
   service: FirebaseStorageImpl,
   location: Location,
   maxDownloadSizeBytes?: number
-): RequestInfo<I, I> {
+): Request {
   const urlPart = location.fullServerUrl();
   const url = makeUrl(urlPart, service.host, service._protocol) + '?alt=media';
   const method = 'GET';
   const timeout = service.maxOperationRetryTime;
-  const requestInfo = new RequestInfo(
+  const request = new Request({
     url,
     method,
-    (_: Connection<I>, data: I) => data,
-    timeout
-  );
+    timeout,
+    headers: { 'Range': 'bytes=0-' + maxDownloadSizeBytes },
+    successCodes: [200 /* OK */, 206 /* Partial Content */],
+    errorCodes: [416 /* Requested Range Not Satisfiable */],
+    errorHandler: objectErrorHandler(location)
+  });
+
   requestInfo.errorHandler = objectErrorHandler(location);
   if (maxDownloadSizeBytes !== undefined) {
     requestInfo.headers['Range'] = `bytes=0-${maxDownloadSizeBytes}`;

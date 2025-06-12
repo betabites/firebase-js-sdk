@@ -29,7 +29,6 @@ import {
   RequestHandler,
   storageServiceWithHandler
 } from './testshared';
-import { injectTestConnection } from '../../src/platform/connection';
 import { Deferred } from '@firebase/util';
 import { canceled, retryLimitExceeded } from '../../src/implementation/error';
 import { SinonFakeTimers, useFakeTimers } from 'sinon';

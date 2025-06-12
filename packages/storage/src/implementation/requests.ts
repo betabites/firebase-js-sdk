@@ -23,7 +23,6 @@ import { Metadata } from '../metadata';
 import { ListResult } from '../list';
 import { FbsBlob } from './blob';
 import {
-  StorageError,
   cannotSliceBlob,
   unauthenticated,
   quotaExceeded,
@@ -41,10 +40,8 @@ import {
   toResourceString
 } from './metadata';
 import { fromResponseString } from './list';
-import { RequestInfo, UrlParams } from './requestinfo';
 import { isString } from './type';
 import { makeUrl } from './url';
-import { Connection, ConnectionType } from './connection';
 import { FirebaseStorageImpl } from '../service';
 
 /**
@@ -56,238 +53,194 @@ export function handlerCheck(cndn: boolean): void {
   }
 }
 
-export function metadataHandler(
+export async function metadataHandler(
+  res: Response,
   service: FirebaseStorageImpl,
   mappings: Mappings
-): (p1: Connection<string>, p2: string) => Metadata {
-  function handler(xhr: Connection<string>, text: string): Metadata {
-    const metadata = fromResourceString(service, text, mappings);
-    handlerCheck(metadata !== null);
-    return metadata as Metadata;
+): Promise<Metadata> {
+  if (!res.ok) {
+    throw unknown();
   }
-  return handler;
+
+  const metadata = fromResourceString(service, await res.text(), mappings);
+  handlerCheck(metadata !== null);
+  return metadata as Metadata;
 }
 
-export function listHandler(
+export async function listHandler(
+  res: Response,
   service: FirebaseStorageImpl,
   bucket: string
-): (p1: Connection<string>, p2: string) => ListResult {
-  function handler(xhr: Connection<string>, text: string): ListResult {
-    const listResult = fromResponseString(service, bucket, text);
-    handlerCheck(listResult !== null);
-    return listResult as ListResult;
+): Promise<ListResult> {
+  if (!res.ok) {
+    throw unknown();
   }
-  return handler;
+
+  const listResult = fromResponseString(service, bucket, await res.text());
+  handlerCheck(listResult !== null);
+  return listResult as ListResult;
 }
 
-export function downloadUrlHandler(
+export async function downloadUrlHandler(
+  res: Response,
   service: FirebaseStorageImpl,
   mappings: Mappings
-): (p1: Connection<string>, p2: string) => string | null {
-  function handler(xhr: Connection<string>, text: string): string | null {
-    const metadata = fromResourceString(service, text, mappings);
-    handlerCheck(metadata !== null);
-    return downloadUrlFromResourceString(
-      metadata as Metadata,
-      text,
-      service.host,
-      service._protocol
-    );
+): Promise<string | null> {
+  if (!res.ok) {
+    throw unknown();
   }
-  return handler;
+
+  const text = await res.text();
+  const metadata = fromResourceString(service, text, mappings);
+  handlerCheck(metadata !== null);
+  return downloadUrlFromResourceString(
+    metadata as Metadata,
+    text,
+    service.host,
+    service._protocol
+  );
 }
 
-export function sharedErrorHandler(
-  location: Location
-): (p1: Connection<ConnectionType>, p2: StorageError) => StorageError {
-  function errorHandler(
-    xhr: Connection<ConnectionType>,
-    err: StorageError
-  ): StorageError {
-    let newErr: StorageError;
-    if (xhr.getStatus() === 401) {
-      if (
-        // This exact message string is the only consistent part of the
-        // server's error response that identifies it as an App Check error.
-        xhr.getErrorText().includes('Firebase App Check token is invalid')
-      ) {
-        newErr = unauthorizedApp();
-      } else {
-        newErr = unauthenticated();
+export async function sharedErrorHandler(
+  res: Response,
+  location: Location,
+): Promise<Response> {
+  if (res.ok) {
+    return res;
+  };
+
+  switch (res.status) {
+    case 401:
+      if (res.statusText.includes('Firebase App Check token is invalid')) {
+        throw unauthorizedApp();
       }
-    } else {
-      if (xhr.getStatus() === 402) {
-        newErr = quotaExceeded(location.bucket);
-      } else {
-        if (xhr.getStatus() === 403) {
-          newErr = unauthorized(location.path);
-        } else {
-          newErr = err;
-        }
-      }
-    }
-    newErr.status = xhr.getStatus();
-    newErr.serverResponse = err.serverResponse;
-    return newErr;
+      throw unauthenticated();
+    case 402:
+      throw quotaExceeded(location.bucket);
+    case 403:
+      throw unauthorized(location.path);
+    default:
+      throw unknown();
   }
-  return errorHandler;
 }
 
 export function objectErrorHandler(
-  location: Location
-): (p1: Connection<ConnectionType>, p2: StorageError) => StorageError {
-  const shared = sharedErrorHandler(location);
-
-  function errorHandler(
-    xhr: Connection<ConnectionType>,
-    err: StorageError
-  ): StorageError {
-    let newErr = shared(xhr, err);
-    if (xhr.getStatus() === 404) {
-      newErr = objectNotFound(location.path);
+  res: Response,
+  location: Location,
+): Promise<Response> {
+  return sharedErrorHandler(res, location).catch(e => {
+    if (res.status === 404) {
+      throw objectNotFound(location.path);
     }
-    newErr.serverResponse = err.serverResponse;
-    return newErr;
-  }
-  return errorHandler;
+    throw e;
+  });
 }
 
-export function getMetadata(
+export function buildMetadataRequest(
   service: FirebaseStorageImpl,
   location: Location,
   mappings: Mappings
-): RequestInfo<string, Metadata> {
+): Request {
   const urlPart = location.fullServerUrl();
   const url = makeUrl(urlPart, service.host, service._protocol);
-  const method = 'GET';
-  const timeout = service.maxOperationRetryTime;
-  const requestInfo = new RequestInfo(
-    url,
-    method,
-    metadataHandler(service, mappings),
-    timeout
-  );
-  requestInfo.errorHandler = objectErrorHandler(location);
-  return requestInfo;
+  return new Request(url, { method: 'GET' });
 }
 
-export function list(
+export function buildListRequest(
   service: FirebaseStorageImpl,
   location: Location,
   delimiter?: string,
   pageToken?: string | null,
   maxResults?: number | null
-): RequestInfo<string, ListResult> {
-  const urlParams: UrlParams = {};
+): Request {
+  const urlParams = new URLSearchParams();
   if (location.isRoot) {
-    urlParams['prefix'] = '';
+    urlParams.set('prefix', '');
   } else {
-    urlParams['prefix'] = location.path + '/';
+    urlParams.set('prefix', location.path + '/');
   }
   if (delimiter && delimiter.length > 0) {
-    urlParams['delimiter'] = delimiter;
+    urlParams.set('delimiter', delimiter);
   }
   if (pageToken) {
-    urlParams['pageToken'] = pageToken;
+    urlParams.set('pageToken', pageToken);
   }
   if (maxResults) {
-    urlParams['maxResults'] = maxResults;
+    urlParams.set('maxResults', maxResults.toString());
   }
   const urlPart = location.bucketOnlyServerUrl();
   const url = makeUrl(urlPart, service.host, service._protocol);
   const method = 'GET';
-  const timeout = service.maxOperationRetryTime;
-  const requestInfo = new RequestInfo(
-    url,
-    method,
-    listHandler(service, location.bucket),
-    timeout
-  );
-  requestInfo.urlParams = urlParams;
-  requestInfo.errorHandler = sharedErrorHandler(location);
-  return requestInfo;
+  // const timeout = service.maxOperationRetryTime;
+  return new Request(url + "?" + urlParams.toString(), { method });
 }
 
-export function getBytes<I extends ConnectionType>(
+export function buildBytesRequest(
   service: FirebaseStorageImpl,
   location: Location,
   maxDownloadSizeBytes?: number
-): RequestInfo<I, I> {
+): Request {
   const urlPart = location.fullServerUrl();
   const url = makeUrl(urlPart, service.host, service._protocol) + '?alt=media';
   const method = 'GET';
-  const timeout = service.maxOperationRetryTime;
-  const requestInfo = new RequestInfo(
-    url,
-    method,
-    (_: Connection<I>, data: I) => data,
-    timeout
-  );
-  requestInfo.errorHandler = objectErrorHandler(location);
+
+  const headers = new Headers({ 'Range': 'bytes=0-' + maxDownloadSizeBytes });
   if (maxDownloadSizeBytes !== undefined) {
-    requestInfo.headers['Range'] = `bytes=0-${maxDownloadSizeBytes}`;
-    requestInfo.successCodes = [200 /* OK */, 206 /* Partial Content */];
+    headers.set('Range', `bytes=0-${maxDownloadSizeBytes}`);
   }
-  return requestInfo;
+
+  return new Request(url, {
+    method,
+    headers
+  });
 }
 
-export function getDownloadUrl(
+export async function getBytesResponseHandler(res: Response, location: Location): Promise<Blob> {
+  if (res.status === 416) {
+    throw new Error('Requested Range Not Satisfiable');
+  } if (![200, 206].includes(res.status)) {
+    throw unknown();
+  }
+  return objectErrorHandler(res, location).then(res => res.blob());
+}
+
+export function buildDownloadUrlRequest(
   service: FirebaseStorageImpl,
   location: Location,
   mappings: Mappings
-): RequestInfo<string, string | null> {
+): Request {
   const urlPart = location.fullServerUrl();
   const url = makeUrl(urlPart, service.host, service._protocol);
   const method = 'GET';
-  const timeout = service.maxOperationRetryTime;
-  const requestInfo = new RequestInfo(
-    url,
-    method,
-    downloadUrlHandler(service, mappings),
-    timeout
-  );
-  requestInfo.errorHandler = objectErrorHandler(location);
-  return requestInfo;
+  // const timeout = service.maxOperationRetryTime;
+  return new Request(url, { method });
 }
 
-export function updateMetadata(
+export function buildUpdateMetadataRequest(
   service: FirebaseStorageImpl,
   location: Location,
   metadata: Partial<Metadata>,
   mappings: Mappings
-): RequestInfo<string, Metadata> {
+): Request {
   const urlPart = location.fullServerUrl();
   const url = makeUrl(urlPart, service.host, service._protocol);
   const method = 'PATCH';
   const body = toResourceString(metadata, mappings);
   const headers = { 'Content-Type': 'application/json; charset=utf-8' };
-  const timeout = service.maxOperationRetryTime;
-  const requestInfo = new RequestInfo(
-    url,
-    method,
-    metadataHandler(service, mappings),
-    timeout
-  );
-  requestInfo.headers = headers;
-  requestInfo.body = body;
-  requestInfo.errorHandler = objectErrorHandler(location);
-  return requestInfo;
+  // const timeout = service.maxOperationRetryTime;
+  return new Request(url, { method, body, headers });
 }
 
-export function deleteObject(
+export function buildDeleteObjectRequest(
   service: FirebaseStorageImpl,
   location: Location
-): RequestInfo<string, void> {
+): Request {
   const urlPart = location.fullServerUrl();
   const url = makeUrl(urlPart, service.host, service._protocol);
   const method = 'DELETE';
-  const timeout = service.maxOperationRetryTime;
+  // const timeout = service.maxOperationRetryTime;
 
-  function handler(_xhr: Connection<string>, _text: string): void {}
-  const requestInfo = new RequestInfo(url, method, handler, timeout);
-  requestInfo.successCodes = [200, 204];
-  requestInfo.errorHandler = objectErrorHandler(location);
-  return requestInfo;
+  return new Request(url, { method });
 }
 
 export function determineContentType_(
@@ -318,13 +271,13 @@ export function metadataForUpload_(
 /**
  * Prepare RequestInfo for uploads as Content-Type: multipart.
  */
-export function multipartUpload(
+export function buildMultipartUploadRequest(
   service: FirebaseStorageImpl,
   location: Location,
   mappings: Mappings,
   blob: FbsBlob,
   metadata?: Metadata | null
-): RequestInfo<string, Metadata> {
+): Request {
   const urlPart = location.bucketOnlyServerUrl();
   const headers: { [prop: string]: string } = {
     'X-Goog-Upload-Protocol': 'multipart'
@@ -358,21 +311,17 @@ export function multipartUpload(
   if (body === null) {
     throw cannotSliceBlob();
   }
-  const urlParams: UrlParams = { name: metadata_['fullPath']! };
+  const urlParams = new URLSearchParams({ name: metadata_['fullPath']! });
   const url = makeUrl(urlPart, service.host, service._protocol);
   const method = 'POST';
-  const timeout = service.maxUploadRetryTime;
-  const requestInfo = new RequestInfo(
-    url,
+  // const timeout = service.maxUploadRetryTime;
+
+  return new Request(url + '?' + urlParams.toString(), {
     method,
-    metadataHandler(service, mappings),
-    timeout
-  );
-  requestInfo.urlParams = urlParams;
-  requestInfo.headers = headers;
-  requestInfo.body = body.uploadData();
-  requestInfo.errorHandler = sharedErrorHandler(location);
-  return requestInfo;
+    body: body.uploadData(),
+    headers
+  });
+
 }
 
 /**
@@ -398,12 +347,12 @@ export class ResumableUploadStatus {
 }
 
 export function checkResumeHeader_(
-  xhr: Connection<string>,
+  res: Response,
   allowed?: string[]
 ): string {
   let status: string | null = null;
   try {
-    status = xhr.getResponseHeader('X-Goog-Upload-Status');
+    status = res.headers.get('X-Goog-Upload-Status');
   } catch (e) {
     handlerCheck(false);
   }
@@ -412,16 +361,16 @@ export function checkResumeHeader_(
   return status as string;
 }
 
-export function createResumableUpload(
+export function buildCreateResumableUploadRequest(
   service: FirebaseStorageImpl,
   location: Location,
   mappings: Mappings,
   blob: FbsBlob,
   metadata?: Metadata | null
-): RequestInfo<string, string> {
+): Request {
   const urlPart = location.bucketOnlyServerUrl();
   const metadataForUpload = metadataForUpload_(location, blob, metadata);
-  const urlParams: UrlParams = { name: metadataForUpload['fullPath']! };
+  const urlParams = new URLSearchParams({ name: metadataForUpload['fullPath']! });
   const url = makeUrl(urlPart, service.host, service._protocol);
   const method = 'POST';
   const headers = {
@@ -432,62 +381,56 @@ export function createResumableUpload(
     'Content-Type': 'application/json; charset=utf-8'
   };
   const body = toResourceString(metadataForUpload, mappings);
-  const timeout = service.maxUploadRetryTime;
+  // const timeout = service.maxUploadRetryTime;
 
-  function handler(xhr: Connection<string>): string {
-    checkResumeHeader_(xhr);
-    let url;
-    try {
-      url = xhr.getResponseHeader('X-Goog-Upload-URL');
-    } catch (e) {
-      handlerCheck(false);
-    }
-    handlerCheck(isString(url));
-    return url as string;
+  return new Request(url + '?' + urlParams.toString(), {
+    method,
+    headers,
+    body,
+  });
+}
+
+export async function createResumableUploadHandler(res: Response): Promise<string> {
+  checkResumeHeader_(res);
+  let url;
+  try {
+    url = res.headers.get('X-Goog-Upload-URL');
+  } catch (e) {
+    handlerCheck(false);
   }
-  const requestInfo = new RequestInfo(url, method, handler, timeout);
-  requestInfo.urlParams = urlParams;
-  requestInfo.headers = headers;
-  requestInfo.body = body;
-  requestInfo.errorHandler = sharedErrorHandler(location);
-  return requestInfo;
+  handlerCheck(isString(url));
+  return url as string;
 }
 
 /**
  * @param url From a call to fbs.requests.createResumableUpload.
  */
-export function getResumableUploadStatus(
-  service: FirebaseStorageImpl,
-  location: Location,
+export function buildGetResumableUploadStatusRequest(
   url: string,
-  blob: FbsBlob
-): RequestInfo<string, ResumableUploadStatus> {
+): Request {
   const headers = { 'X-Goog-Upload-Command': 'query' };
-
-  function handler(xhr: Connection<string>): ResumableUploadStatus {
-    const status = checkResumeHeader_(xhr, ['active', 'final']);
-    let sizeString: string | null = null;
-    try {
-      sizeString = xhr.getResponseHeader('X-Goog-Upload-Size-Received');
-    } catch (e) {
-      handlerCheck(false);
-    }
-
-    if (!sizeString) {
-      // null or empty string
-      handlerCheck(false);
-    }
-
-    const size = Number(sizeString);
-    handlerCheck(!isNaN(size));
-    return new ResumableUploadStatus(size, blob.size(), status === 'final');
-  }
   const method = 'POST';
-  const timeout = service.maxUploadRetryTime;
-  const requestInfo = new RequestInfo(url, method, handler, timeout);
-  requestInfo.headers = headers;
-  requestInfo.errorHandler = sharedErrorHandler(location);
-  return requestInfo;
+  // const timeout = service.maxUploadRetryTime;
+  return new Request(url, { method, headers });
+}
+
+export async function getResumableUploadStatusHandler(res: Response, blob: FbsBlob): Promise<ResumableUploadStatus> {
+  const status = checkResumeHeader_(res, ['active', 'final']);
+  let sizeString: string | null = null;
+  try {
+    sizeString = res.headers.get('X-Goog-Upload-Size-Received');
+  } catch (e) {
+    handlerCheck(false);
+  }
+
+  if (!sizeString) {
+    // null or empty string
+    handlerCheck(false);
+  }
+
+  const size = Number(sizeString);
+  handlerCheck(!isNaN(size));
+  return new ResumableUploadStatus(size, blob.size(), status === 'final');
 }
 
 /**
@@ -505,7 +448,7 @@ export const RESUMABLE_UPLOAD_CHUNK_SIZE: number = 256 * 1024;
  *     has a final size inconsistent with the blob, or the blob cannot be sliced
  *     for upload.
  */
-export function continueResumableUpload(
+export function buildContinueResumableUploadRequest(
   location: Location,
   service: FirebaseStorageImpl,
   url: string,
@@ -514,7 +457,10 @@ export function continueResumableUpload(
   mappings: Mappings,
   status?: ResumableUploadStatus | null,
   progressCallback?: ((p1: number, p2: number) => void) | null
-): RequestInfo<string, ResumableUploadStatus> {
+): {
+  req: Request,
+  handler(res: Response): Promise<ResumableUploadStatus>
+} {
   // TODO(andysoto): standardize on internal asserts
   // assert(!(opt_status && opt_status.finalized));
   const status_ = new ResumableUploadStatus(0, 0);
@@ -552,20 +498,20 @@ export function continueResumableUpload(
     throw cannotSliceBlob();
   }
 
-  function handler(
-    xhr: Connection<string>,
-    text: string
-  ): ResumableUploadStatus {
+  async function handler(res: Response): Promise<ResumableUploadStatus> {
+    // Check for errors
+    await sharedErrorHandler(res, location);
+
     // TODO(andysoto): Verify the MD5 of each uploaded range:
     // the 'x-range-md5' header comes back with status code 308 responses.
     // We'll only be able to bail out though, because you can't re-upload a
     // range that you previously uploaded.
-    const uploadStatus = checkResumeHeader_(xhr, ['active', 'final']);
+    const uploadStatus = checkResumeHeader_(res, ['active', 'final']);
     const newCurrent = status_.current + bytesToUpload;
     const size = blob.size();
     let metadata;
     if (uploadStatus === 'final') {
-      metadata = metadataHandler(service, mappings)(xhr, text);
+      metadata = await metadataHandler(res, service, mappings);
     } else {
       metadata = null;
     }
@@ -577,11 +523,7 @@ export function continueResumableUpload(
     );
   }
   const method = 'POST';
-  const timeout = service.maxUploadRetryTime;
-  const requestInfo = new RequestInfo(url, method, handler, timeout);
-  requestInfo.headers = headers;
-  requestInfo.body = body.uploadData();
-  requestInfo.progressCallback = progressCallback || null;
-  requestInfo.errorHandler = sharedErrorHandler(location);
-  return requestInfo;
+  // const timeout = service.maxUploadRetryTime;
+
+  return { req: new Request(url, { method, headers }), handler };
 }

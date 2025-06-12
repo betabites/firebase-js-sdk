@@ -39,7 +39,6 @@ import { Provider } from '@firebase/component';
 import { AppCheckInternalComponentName } from '@firebase/app-check-interop-types';
 import { fakeServerHandler, storageServiceWithHandler } from './testshared';
 import { decodeUint8Array } from '../../src/platform/base64';
-import { injectTestConnection } from '../../src/platform/connection';
 
 /* eslint-disable @typescript-eslint/no-floating-promises */
 function makeFakeService(

@@ -18,7 +18,6 @@
 /**
  * @fileoverview Functions to create and manipulate URLs for the server API.
  */
-import { UrlParams } from './requestinfo';
 
 export function makeUrl(
   urlPart: string,

@@ -16,9 +16,6 @@
  */
 import { assert } from 'chai';
 import * as sinon from 'sinon';
-import { makeRequest } from '../../src/implementation/request';
-import { RequestInfo } from '../../src/implementation/requestinfo';
-import { Connection } from '../../src/implementation/connection';
 import { TestingConnection, newTestConnection } from './connection';
 
 const TEST_VERSION = '1.2.3';

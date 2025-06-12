@@ -23,54 +23,53 @@
 import { retryLimitExceeded, unknown } from './error';
 import { isRetryStatusCode } from './utils';
 import { isCloudWorkstation } from '@firebase/util';
+import { start, stop } from './backoff';
 
-export function buildHeaders(options: {
-  appId?: string | null,
-  authToken?: string | null,
-  appCheckToken?: string | null,
-  firebaseVersion?: string,
-  isUsingEmulator?: boolean
-}, headers = new Headers()): Headers {
+export function buildHeaders(
+  options: {
+    appId?: string | null;
+    authToken?: string | null;
+    appCheckToken?: string | null;
+    firebaseVersion?: string;
+  },
+  headers = new Headers()
+): Headers {
   if (options.appId) {
     headers.set('X-Firebase-GMPID', options.appId);
-  };
+  }
   if (options.authToken) {
     headers.set('Authorization', 'Firebase ' + options.authToken);
   }
   if (options.appCheckToken) {
-    headers.set("X-Firebase-AppCheck", options.appCheckToken);
+    headers.set('X-Firebase-AppCheck', options.appCheckToken);
   }
-  headers.set('X-Firebase-Storage-Version', 'webjs/' + (options.firebaseVersion ?? 'AppManager'));
+  headers.set(
+    'X-Firebase-Storage-Version',
+    'webjs/' + (options.firebaseVersion ?? 'AppManager')
+  );
 
   return headers;
 }
 
 export async function makeRequest(
   input: string | URL | Request,
-  retryLimit: number,
   init?: RequestInit & { isUsingEmulator?: boolean }
 ): Promise<Response> {
-  let lastError: Error | null = null;
   if (init?.isUsingEmulator && isCloudWorkstation(input)) {
     init.credentials = 'include';
   }
 
-  for (let i = 0; i < retryLimit; i++) {
-    const req = await fetch(input, init);
-    if (!req.ok) {
-      if (!isRetryStatusCode(req.status, [])) {
-        throw unknown();
-      }
-      lastError = unknown();
-      continue;
+  const req = await fetch(input, init);
+  if (!req.ok) {
+    if (!isRetryStatusCode(req.status, [])) {
+      /*
+       Return the request instead of throwing an error, so that higher layers
+       can parse the response for a more detailed error.
+       */
+      return req;
     }
-
-    return req;
+    throw unknown();
   }
 
-  if (lastError) {
-    throw lastError;
-  } else {
-    throw retryLimitExceeded();
-  }
+  return req;
 }

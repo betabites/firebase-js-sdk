@@ -39,21 +39,24 @@ import {
   StorageObserver as StorageObserverInternal,
   NextFn
 } from './implementation/observer';
-import { Request } from './implementation/request';
 import { UploadTaskSnapshot, StorageObserver } from './public-types';
 import { async as fbsAsync } from './implementation/async';
 import { Mappings, getMappings } from './implementation/metadata';
 import {
-  createResumableUpload,
-  getResumableUploadStatus,
+  buildCreateResumableUploadRequest,
+  buildGetResumableUploadStatusRequest,
   RESUMABLE_UPLOAD_CHUNK_SIZE,
   ResumableUploadStatus,
-  continueResumableUpload,
-  getMetadata,
-  multipartUpload
+  buildContinueResumableUploadRequest,
+  buildMetadataRequest,
+  buildMultipartUploadRequest,
+  objectErrorHandler,
+  metadataHandler,
+  sharedErrorHandler,
+  createResumableUploadHandler,
+  getResumableUploadStatusHandler
 } from './implementation/requests';
 import { Reference } from './reference';
-import { newTextConnection } from './platform/connection';
 import { isRetryStatusCode } from './implementation/utils';
 import { CompleteFn } from '@firebase/util';
 import { DEFAULT_MIN_SLEEP_TIME_MILLIS } from './implementation/constants';
@@ -88,6 +91,7 @@ export class UploadTask {
   _state: InternalTaskState;
   private _error?: StorageError = undefined;
   private _uploadUrl?: string = undefined;
+  // TODO: Revisit
   private _request?: Request<unknown> = undefined;
   private _chunkMultiplier: number = 1;
   private _errorHandler: (p1: StorageError) => void;
@@ -231,7 +235,7 @@ export class UploadTask {
 
   private _createResumable(): void {
     this._resolveToken((authToken, appCheckToken) => {
-      const requestInfo = createResumableUpload(
+      const requestInfo = buildCreateResumableUploadRequest(
         this._ref.storage,
         this._ref._location,
         this._mappings,
@@ -240,17 +244,19 @@ export class UploadTask {
       );
       const createRequest = this._ref.storage._makeRequest(
         requestInfo,
-        newTextConnection,
         authToken,
         appCheckToken
-      );
+      )
+        .then(res => sharedErrorHandler(res, this._ref._location))
+        .then(res => createResumableUploadHandler(res))
+        .then(url => {
+          this._request = undefined;
+          this._uploadUrl = url;
+          this._needToFetchStatus = false;
+          this.completeTransitions_();
+        })
+        .catch(this._errorHandler);
       this._request = createRequest;
-      createRequest.getPromise().then((url: string) => {
-        this._request = undefined;
-        this._uploadUrl = url;
-        this._needToFetchStatus = false;
-        this.completeTransitions_();
-      }, this._errorHandler);
     });
   }
 
@@ -258,29 +264,25 @@ export class UploadTask {
     // TODO(andysoto): assert(this.uploadUrl_ !== null);
     const url = this._uploadUrl as string;
     this._resolveToken((authToken, appCheckToken) => {
-      const requestInfo = getResumableUploadStatus(
-        this._ref.storage,
-        this._ref._location,
-        url,
-        this._blob
-      );
+      const requestInfo = buildGetResumableUploadStatusRequest(url);
       const statusRequest = this._ref.storage._makeRequest(
         requestInfo,
-        newTextConnection,
         authToken,
         appCheckToken
-      );
+      )
+        .then(res => sharedErrorHandler(res, this._ref._location))
+        .then(res => getResumableUploadStatusHandler(res, this._blob))
+        .then(status => {
+          this._request = undefined;
+          this._updateProgress(status.current);
+          this._needToFetchStatus = false;
+          if (status.finalized) {
+            this._needToFetchMetadata = true;
+          }
+          this.completeTransitions_();
+        })
+        .catch(this._errorHandler);
       this._request = statusRequest;
-      statusRequest.getPromise().then(status => {
-        status = status as ResumableUploadStatus;
-        this._request = undefined;
-        this._updateProgress(status.current);
-        this._needToFetchStatus = false;
-        if (status.finalized) {
-          this._needToFetchMetadata = true;
-        }
-        this.completeTransitions_();
-      }, this._errorHandler);
     });
   }
 
@@ -296,7 +298,7 @@ export class UploadTask {
     this._resolveToken((authToken, appCheckToken) => {
       let requestInfo;
       try {
-        requestInfo = continueResumableUpload(
+        requestInfo = buildContinueResumableUploadRequest(
           this._ref._location,
           this._ref.storage,
           url,
@@ -312,24 +314,25 @@ export class UploadTask {
         return;
       }
       const uploadRequest = this._ref.storage._makeRequest(
-        requestInfo,
-        newTextConnection,
+        requestInfo.req,
         authToken,
         appCheckToken,
         /*retry=*/ false // Upload requests should not be retried as each retry should be preceded by another query request. Which is handled in this file.
-      );
+      )
+        .then(res => requestInfo.handler(res))
+        .then(newStatus => {
+          this._increaseMultiplier();
+          this._request = undefined;
+          this._updateProgress(newStatus.current);
+          if (newStatus.finalized) {
+            this._metadata = newStatus.metadata;
+            this._transition(InternalTaskState.SUCCESS);
+          } else {
+            this.completeTransitions_();
+          }
+        })
+        .catch(this._errorHandler);
       this._request = uploadRequest;
-      uploadRequest.getPromise().then((newStatus: ResumableUploadStatus) => {
-        this._increaseMultiplier();
-        this._request = undefined;
-        this._updateProgress(newStatus.current);
-        if (newStatus.finalized) {
-          this._metadata = newStatus.metadata;
-          this._transition(InternalTaskState.SUCCESS);
-        } else {
-          this.completeTransitions_();
-        }
-      }, this._errorHandler);
     });
   }
 
@@ -344,29 +347,31 @@ export class UploadTask {
 
   private _fetchMetadata(): void {
     this._resolveToken((authToken, appCheckToken) => {
-      const requestInfo = getMetadata(
+      const requestInfo = buildMetadataRequest(
         this._ref.storage,
         this._ref._location,
         this._mappings
       );
-      const metadataRequest = this._ref.storage._makeRequest(
+      this._request = this._ref.storage._makeRequest(
         requestInfo,
-        newTextConnection,
         authToken,
         appCheckToken
-      );
-      this._request = metadataRequest;
-      metadataRequest.getPromise().then(metadata => {
-        this._request = undefined;
-        this._metadata = metadata;
-        this._transition(InternalTaskState.SUCCESS);
-      }, this._metadataErrorHandler);
+      )
+        .then(res => objectErrorHandler(res, this._ref._location))
+        .then(res => metadataHandler(res, this._ref.storage, this._mappings))
+        .then(meta => {
+          this._metadata = meta;
+          this._needToFetchMetadata = false;
+          this.completeTransitions_();
+          this._transition(InternalTaskState.SUCCESS);
+        })
+        .catch(this._metadataErrorHandler);
     });
   }
 
   private _oneShotUpload(): void {
     this._resolveToken((authToken, appCheckToken) => {
-      const requestInfo = multipartUpload(
+      const requestInfo = buildMultipartUploadRequest(
         this._ref.storage,
         this._ref._location,
         this._mappings,
@@ -375,17 +380,19 @@ export class UploadTask {
       );
       const multipartRequest = this._ref.storage._makeRequest(
         requestInfo,
-        newTextConnection,
         authToken,
         appCheckToken
-      );
+      )
+        .then(res => sharedErrorHandler(res, this._ref._location))
+        .then(res => metadataHandler(res, this._ref.storage, this._mappings))
+        .then(meta => {
+          this._request = undefined;
+          this._metadata = meta;
+          this._updateProgress(this._blob.size());
+          this._transition(InternalTaskState.SUCCESS);
+        })
+        .catch(this._errorHandler);
       this._request = multipartRequest;
-      multipartRequest.getPromise().then(metadata => {
-        this._request = undefined;
-        this._metadata = metadata;
-        this._updateProgress(this._blob.size());
-        this._transition(InternalTaskState.SUCCESS);
-      }, this._errorHandler);
     });
   }
 
